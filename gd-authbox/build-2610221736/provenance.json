@@ -1,0 +1,18 @@
+{
+  "distribution_id": "gd-authbox",
+  "build_id": "build-2610221736",
+  "internal_release": "2.1.0",
+  "leaf": "platforms/gd-authbox-v21",
+  "leaf_sha": "8f177407bf34edc7ff9d4fafe4b85d92a0e88990",
+  "image": "ghcr.io/grep-digital/gd-authbox:build-2610221736",
+  "also_tag_latest": false,
+  "kind": "wheel-image",
+  "dockerfiles": [
+    "Dockerfile"
+  ],
+  "wheel_deps": [
+    "E:/code/grdd-artefacts-v21/packages/nexus-packages/nexus-auth-v2",
+    "E:/code/grdd-artefacts-v21/packages/nexus-packages/nexus-common-v3"
+  ],
+  "documentation": "https://github.com/Grep-Digital/grdd-artefacts"
+}

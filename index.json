@@ -1,0 +1,11 @@
+{
+  "releases": [
+    {
+      "distribution_id": "gd-authbox",
+      "build_id": "build-2610221736",
+      "internal_release": "2.1.0",
+      "leaf_sha": "8f177407bf34edc7ff9d4fafe4b85d92a0e88990",
+      "image": "ghcr.io/grep-digital/gd-authbox:build-2610221736"
+    }
+  ]
+}
