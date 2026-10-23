@@ -11,8 +11,8 @@
     "Dockerfile"
   ],
   "wheel_deps": [
-    "E:/code/grdd-artefacts-v21/packages/nexus-packages/nexus-auth-v2",
-    "E:/code/grdd-artefacts-v21/packages/nexus-packages/nexus-common-v3"
+    "packages/nexus-packages/nexus-auth-v2",
+    "packages/nexus-packages/nexus-common-v3"
   ],
   "documentation": "https://github.com/Grep-Digital/grdd-artefacts"
 }
