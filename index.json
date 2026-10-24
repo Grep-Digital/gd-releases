@@ -12,7 +12,11 @@
       "build_id": "build-2610240514",
       "internal_release": "2.1.7",
       "leaf_sha": "ab81d7f6f122f980c74607268cc112e30fb87f4e",
-      "image": null
+      "image": null,
+      "images": [
+        "ghcr.io/grep-digital/gd-fiwarebox-mosquitto-mtls:build-2610240514",
+        "ghcr.io/grep-digital/gd-fiwarebox-mediamtx:build-2610240514"
+      ]
     }
   ]
 }

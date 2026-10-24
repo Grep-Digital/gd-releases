@@ -5,6 +5,16 @@
   "leaf": "platforms/gd-fiwarebox-v21",
   "leaf_sha": "ab81d7f6f122f980c74607268cc112e30fb87f4e",
   "image": null,
+  "images": [
+    {
+      "name": "ghcr.io/grep-digital/gd-fiwarebox-mosquitto-mtls:build-2610240514",
+      "digest": "sha256:0a18b394cb67ff335653a4816feaea37a6b484748222f2bf170b2de1166b6afd"
+    },
+    {
+      "name": "ghcr.io/grep-digital/gd-fiwarebox-mediamtx:build-2610240514",
+      "digest": "sha256:862c2e15754249c345fb38eb498a1a5bd2ef20948cfa3d840e4e29329aa745a4"
+    }
+  ],
   "also_tag_latest": false,
   "kind": "many-dockerfiles",
   "dockerfiles": [
