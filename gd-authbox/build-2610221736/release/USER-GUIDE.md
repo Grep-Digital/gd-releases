@@ -14,20 +14,20 @@ docker exec auth-sandbox-postgres-1 pg_isready -U nexus -d authbox_lab
 > /var/run/postgresql:5432 - accepting connections
 > ```
 
-Commands name the **access path**. Set it once per session from the compose mode you launched. The contract for claims, routes, and status codes is [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). The full pass is [SCENARIO-TESTING.md](SCENARIO-TESTING.md).
+Set one switch once per session. The containers are already running. Setting the switch does not start containers and does not replace the running set. The contract for claims, routes, and status codes is [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). The full pass is [SCENARIO-TESTING.md](SCENARIO-TESTING.md).
 
-| Access | Compose mode | Keycloak `$KC` | API `$API` |
-|---|---|---|---|
-| **Direct** | `base`, `min`, `dev`, `dev-pki` | `http://localhost:8080` | `http://localhost:8000` |
-| **Gateway** | `dev-secure`, any `-WithFiwareLink` | `http://localhost:9000` | `http://localhost:9000` |
+| Switch | Keycloak `$KC` | API `$API` |
+|---|---|---|
+| **Lab** | `http://localhost:8080` | `http://localhost:8000` |
+| **Gateway** | `http://localhost:9000` | `http://localhost:9000` |
 
-`dev` and `dev-pki` publish both access paths. `dev-secure` and a start with `-WithFiwareLink` publish gateway access and leave host ports 8000 and 8080 unpublished.
+On the lab switch, host port 9000 may also be open. On the gateway switch, host ports 8000 and 8080 are not published.
 
 ```powershell
 $Access = "direct"; $KC = "http://localhost:8080"; $API = "http://localhost:8000"
 ```
 
-Gateway access. Launch with `up -Mode dev-secure`, or add `-WithFiwareLink`.
+Gateway switch. Both are already listening on port 9000. This assignment does not replace the running set.
 
 ```powershell
 $Access = "gateway"; $KC = "http://localhost:9000"; $API = "http://localhost:9000"
@@ -57,7 +57,7 @@ Invoke-RestMethod -Uri "$API/authbox/default/default/api/v1/verifier/evaluate" -
 
 Postman: `GET {{api}}/authbox/default/default/api/v1/verifier/evaluate`, Authorization type Bearer, token `{{token_a}}`.
 
-Compose project name is **`auth-sandbox`**. Container names are `auth-sandbox-<service>-1`.
+Container names are `auth-sandbox-<service>-1`.
 
 ---
 
@@ -78,11 +78,11 @@ Compose project name is **`auth-sandbox`**. Container names are `auth-sandbox-<s
 
 | Section | Covers |
 |---|---|
-| [7. Modes and access paths](#7-modes-and-access-paths) | which containers each mode runs, and the start command |
+| [7. Ports already open](#7-ports-already-open) | which ports are already listening |
 | [8. How the services fit together](#8-how-the-services-fit-together) | Postgres, Keycloak, the API, and Envoy |
-| [9. Cross-service reference](#9-cross-service-reference) | names, lab credentials, health |
+| [9. Cross-service reference](#9-cross-service-reference) | container names, environment names, health |
 | [10. End-to-end verification](#10-end-to-end-verification) | the scenario pass |
-| [Appendix A](#appendix-a--where-things-are-defined) | where each thing is defined |
+| [Appendix A](#appendix-a--running-containers) | the containers that are already running |
 
 ---
 
@@ -101,9 +101,9 @@ Keycloak waits until `pg_isready` succeeds, then runs its own schema migration.
 ### 1.2 What it provides
 
 - Durable storage for the realm `nexus-test`.
-- One lab database, `authbox_lab`, on volume `pgdata_lab`, for every `sandbox-ctl` lab mode.
-- A separate on-prem database, `authbox_production`, on volume `pgdata_onprem`.
-- Host port `5433` on lab modes.
+- One lab database, `authbox_lab`, on volume `pgdata_lab`, whenever the lab containers are the ones running.
+- A separate on-prem database, `authbox_production`, on volume `pgdata_onprem`, when that deployment is the one running.
+- Host port `5433` when the lab database publishes it.
 
 ### 1.3 What you can achieve
 
@@ -117,19 +117,19 @@ Keycloak waits until `pg_isready` succeeds, then runs its own schema migration.
 
 ```text
 image: postgres:16-alpine
-POSTGRES_USER: nexus
-POSTGRES_PASSWORD: nexus_lab
-POSTGRES_DB: authbox_lab
+POSTGRES_USER: already set in the container
+POSTGRES_PASSWORD: already set in the container
+POSTGRES_DB: authbox_lab on the lab containers
 ports: 5433:5432
 volume: pgdata_lab
 healthcheck: pg_isready -U nexus -d authbox_lab
 ```
 
-`down` leaves `pgdata_lab` in place. `down-volumes` deletes it.
+Replacing the Postgres container keeps the volume `pgdata_lab`. Deleting that volume deletes the realm.
 
 ### 1.5 Tasks
 
-**1.5.1 Readiness**
+#### 1.5.1 Readiness
 
 ```powershell
 docker exec auth-sandbox-postgres-1 pg_isready -U nexus -d authbox_lab
@@ -139,7 +139,7 @@ docker exec auth-sandbox-postgres-1 pg_isready -U nexus -d authbox_lab
 > /var/run/postgresql:5432 - accepting connections
 > ```
 
-**1.5.2 Realms and users**
+#### 1.5.2 Realms and users
 
 ```powershell
 docker exec auth-sandbox-postgres-1 psql -U nexus -d authbox_lab -c "SELECT name FROM realm ORDER BY name;"
@@ -153,7 +153,7 @@ docker exec auth-sandbox-postgres-1 psql -U nexus -d authbox_lab -c "SELECT user
 
 The list includes `testuser`, `tenant_b_user`, `iot-operator`, and `iot-device`.
 
-**1.5.3 Stored attributes**
+#### 1.5.3 Stored attributes
 
 ```powershell
 docker exec auth-sandbox-postgres-1 psql -U nexus -d authbox_lab -c "SELECT u.username, ua.name, ua.value FROM user_attribute ua JOIN user_entity u ON u.id = ua.user_id WHERE u.username IN ('testuser','tenant_b_user') ORDER BY u.username, ua.name;"
@@ -204,16 +204,16 @@ Keycloak 24 is the identity provider. It stores the realm in Postgres and mints 
 | Setting | Value |
 |---|---|
 | Image | `quay.io/keycloak/keycloak:24.0` |
-| Admin | `admin` / `admin` |
+| Admin | `KEYCLOAK_ADMIN` and `KEYCLOAK_ADMIN_PASSWORD`, already set inside the Keycloak container |
 | Database URL | `jdbc:postgresql://postgres:5432/authbox_lab` |
 | Direct port | `:8080` |
 | Gateway port | `:9000` via Envoy, path `/realms/` |
 
-The public issuer is the host in the access path you launched: port 8080 on direct access, port 9000 on gateway access. The browser and the API use that same host. Inside the network the API fetches keys from `http://keycloak:8080/realms/nexus-test/protocol/openid-connect/certs`.
+The public issuer is the host on the switch you set: port 8080 on the lab switch, port 9000 on the gateway switch. The browser and the API use that same host. Inside the network the API fetches keys from `http://keycloak:8080/realms/nexus-test/protocol/openid-connect/certs`.
 
 ### 2.5 Tasks
 
-**2.5.1 Discovery**
+#### 2.5.1 Discovery
 
 ```powershell
 (Invoke-WebRequest -Uri "$KC/realms/nexus-test/.well-known/openid-configuration" -UseBasicParsing).StatusCode
@@ -229,10 +229,10 @@ curl.exe -sS -o NUL -w "%{http_code}" "$KC/realms/nexus-test/.well-known/openid-
 
 Postman: `GET {{keycloak}}/realms/nexus-test/.well-known/openid-configuration`.
 
-**2.5.2 Password grant**
+#### 2.5.2 Password grant
 
 ```powershell
-$raw = Invoke-RestMethod -Method Post -Uri "$KC/realms/nexus-test/protocol/openid-connect/token" -ContentType "application/x-www-form-urlencoded" -Body "grant_type=password&client_id=nexus-sandbox&client_secret=changeme&username=testuser&password=testpass"; $p = $raw.access_token.Split('.')[1]; $p += '=' * ((4 - $p.Length % 4) % 4); $c = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p.Replace('-','+').Replace('_','/'))) | ConvertFrom-Json; "tid=$($c.tid) roles=$($c.roles -join ',')"
+$raw = Invoke-RestMethod -Method Post -Uri "$KC/realms/nexus-test/protocol/openid-connect/token" -ContentType "application/x-www-form-urlencoded" -Body "grant_type=password&client_id=nexus-sandbox&client_secret=$env:NEXUS_AUTH_CLIENT_SECRET&username=$env:AUTHBOX_USER_A&password=$env:AUTHBOX_USER_A_PASSWORD"; $p = $raw.access_token.Split('.')[1]; $p += '=' * ((4 - $p.Length % 4) % 4); $c = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p.Replace('-','+').Replace('_','/'))) | ConvertFrom-Json; "tid=$($c.tid) roles=$($c.roles -join ',')"
 ```
 
 > ```
@@ -241,34 +241,29 @@ $raw = Invoke-RestMethod -Method Post -Uri "$KC/realms/nexus-test/protocol/openi
 
 Role order can differ. `admin` and `operator` are present. The claim list has `tid` and has no `tenant_id`.
 
-```powershell
-curl.exe -sS -X POST "$KC/realms/nexus-test/protocol/openid-connect/token" -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=password&client_id=nexus-sandbox&client_secret=changeme&username=testuser&password=testpass"
-```
+Write the form body to a UTF-8 file with no byte-order mark. The secret fields are `NEXUS_AUTH_CLIENT_SECRET`, `AUTHBOX_USER_A`, and `AUTHBOX_USER_A_PASSWORD`. Then `curl.exe --config` that file. Do not put those values on the `curl.exe` command line.
 
-Postman: `POST {{keycloak}}/realms/nexus-test/protocol/openid-connect/token`, body type x-www-form-urlencoded, fields `grant_type=password`, `client_id=nexus-sandbox`, `client_secret=changeme`, `username=testuser`, `password=testpass`. Save `access_token` as `token_a`. The PowerShell line above is what prints claim `tid`.
+Postman: `POST {{keycloak}}/realms/nexus-test/protocol/openid-connect/token`, body type x-www-form-urlencoded. The secret fields are the Postman variables `NEXUS_AUTH_CLIENT_SECRET`, `AUTHBOX_USER_A`, and `AUTHBOX_USER_A_PASSWORD`. Save `access_token` as `token_a`. The PowerShell line above is what prints claim `tid`.
 
-**2.5.3 Machine token**
+#### 2.5.3 Machine token
 
 ```powershell
-$raw = Invoke-RestMethod -Method Post -Uri "$KC/realms/nexus-test/protocol/openid-connect/token" -ContentType "application/x-www-form-urlencoded" -Body "grant_type=client_credentials&client_id=nexus-m2m&client_secret=changeme"; $p = $raw.access_token.Split('.')[1]; $p += '=' * ((4 - $p.Length % 4) % 4); $c = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p.Replace('-','+').Replace('_','/'))) | ConvertFrom-Json; "tid=$($c.tid)"
+$raw = Invoke-RestMethod -Method Post -Uri "$KC/realms/nexus-test/protocol/openid-connect/token" -ContentType "application/x-www-form-urlencoded" -Body "grant_type=client_credentials&client_id=$env:NEXUS_SIMULATOR_M2M_CLIENT_ID&client_secret=$env:NEXUS_AUTH_M2M_CLIENT_SECRET"; $p = $raw.access_token.Split('.')[1]; $p += '=' * ((4 - $p.Length % 4) % 4); $c = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p.Replace('-','+').Replace('_','/'))) | ConvertFrom-Json; "tid=$($c.tid)"
 ```
 
 > ```
 > tid=tenant_a
 > ```
 
-```powershell
-curl.exe -sS -X POST "$KC/realms/nexus-test/protocol/openid-connect/token" -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials&client_id=nexus-m2m&client_secret=changeme"
-```
+Write the form body to a UTF-8 file with no byte-order mark. The secret field is `NEXUS_AUTH_M2M_CLIENT_SECRET`. Then `curl.exe --config` that file. Do not put that value on the `curl.exe` command line.
 
-Postman: same URL as the password grant, body `grant_type=client_credentials`, `client_id=nexus-m2m`, `client_secret=changeme`. Save `access_token` as `token_m`.
+Postman: same URL as the password grant, body `grant_type=client_credentials`. The client id variable is `NEXUS_SIMULATOR_M2M_CLIENT_ID`. The secret variable is `NEXUS_AUTH_M2M_CLIENT_SECRET`. Save `access_token` as `token_m`.
 
-**2.5.4 Clients**
-
+#### 2.5.4 Clients
 On gateway access, host `:8080` is unpublished. Run the admin CLI inside the container.
 
 ```powershell
-docker exec auth-sandbox-keycloak-1 /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin
+docker exec auth-sandbox-keycloak-1 sh -c '/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD"'
 ```
 
 ```powershell
@@ -283,7 +278,7 @@ A password-grant token for `testuser` evaluates at the API. That check is [S-16]
 
 ### 2.7 Gotchas
 
-Use `$KC` for the access path you launched. A token from `:8080` fails evaluation on an API whose issuer is `:9000`, and the reverse.
+Use `$KC` for the switch you set. A token from `:8080` fails evaluation on an API whose issuer is `:9000`, and the reverse.
 
 The gateway does not route `/admin/`. A call to `http://localhost:9000/admin/...` is an unrouted path. The status matrix is in [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md).
 
@@ -329,11 +324,13 @@ The seeded URL tenant and instance are both `default`. That path is the sandbox 
 | Manifest | `/app/tests/simulator/assets/discovery.json` |
 | Continuous verify | on, session max age 30 minutes, state in the API process |
 
-The program is copied into the image. After a change to `src/`, rebuild the image and recreate `authbox-api`. Restarting the old container runs the previous program. Seed runs from the entrypoint once Keycloak answers.
+The program is already in the image. Seed has already run. Restarting the same container runs that same program.
+
+If any of these is empty inside the API container, seed stops and the API process does not stay up: `KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD`, `NEXUS_AUTH_CLIENT_SECRET`, `NEXUS_AUTH_M2M_CLIENT_SECRET`, `NEXUS_SIMULATOR_KEYCLOAK_PASSWORD`, `NEXUS_SIMULATOR_TENANT_B_PASSWORD`, `NEXUS_SIMULATOR_IOT_OPERATOR_PASSWORD`, `NEXUS_SIMULATOR_IOT_DEVICE_PASSWORD`. The image does not invent a value. The caller names `AUTHBOX_USER_A_PASSWORD`, `AUTHBOX_USER_B_PASSWORD`, and `AUTHBOX_EDGE_PASSWORD` are copies of values already set in the containers.
 
 ### 3.5 Tasks
 
-**3.5.1 Health**
+#### 3.5.1 Health
 
 ```powershell
 Invoke-RestMethod "$API/authbox/health"
@@ -351,7 +348,7 @@ curl.exe -sS "$API/authbox/health"
 
 Postman: `GET {{api}}/authbox/health`.
 
-**3.5.2 Authorize**
+#### 3.5.2 Authorize
 
 ```powershell
 $auth = Invoke-RestMethod "$API/authbox/default/default/api/v1/auth/authorize?state=doc-state"; "state=$($auth.state) verifier_len=$($auth._sandbox_code_verifier.Length)"
@@ -369,8 +366,7 @@ curl.exe -sS "$API/authbox/default/default/api/v1/auth/authorize?state=doc-state
 
 Postman: `GET {{api}}/authbox/default/default/api/v1/auth/authorize?state=doc-state`.
 
-**3.5.3 Evaluate**
-
+#### 3.5.3 Evaluate
 Mint `$TokenA` with the password grant in [2.5.2](#252-password-grant), then:
 
 ```powershell
@@ -413,7 +409,7 @@ Evaluation of a token with an empty `tid` returns `401` and `{"detail":"Missing 
 
 FIWARE and IUDX headers without a bearer return that same `401`. The headers are correlation.
 
-`required_role` is enforced after the caller is accepted. `testuser` does not have realm role `viewer`. `tenant_b_user` does. Edge user `airuser` has manifest role `operator`. Edge role `reader` is not a realm role.
+`required_role` is enforced after the caller is accepted. `AUTHBOX_USER_A` does not have realm role `viewer`. `AUTHBOX_USER_B` does. `AUTHBOX_EDGE_USER` has manifest role `operator` and requires `AUTHBOX_EDGE_PASSWORD`. Username alone is `401`. Edge role `reader` is not a realm role.
 
 Calls with no bearer, including edge verify, Aadhaar, and wallet, use direct access (API port 8000). On gateway access, Envoy answers `/authbox/` before the API when the JWT is missing.
 
@@ -421,14 +417,14 @@ Calls with no bearer, including edge verify, Aadhaar, and wallet, use direct acc
 
 ### 4.1 What it is
 
-Envoy is the gateway. It publishes Keycloak under `/realms/` and the API under `/authbox/`. Linked mode also publishes `/orion/` and `/iotagent/`.
+Envoy is the gateway. It publishes Keycloak under `/realms/` and the API under `/authbox/`. When the device listener is published it also publishes `/orion/` and `/iotagent/`.
 
 ### 4.2 What it provides
 
 - One host port, `:9000`, for gateway access.
 - JWT checks on `/authbox/`, `/orion/`, and `/iotagent/`.
 - Envoy admin on `:9901`.
-- Device mTLS on `:1029` when the FIWARE link overlay is up, and MQTT on `:8883`.
+- Device mTLS on `:1029` when that listener is published, and MQTT on `:8883`.
 
 ### 4.3 What you can achieve
 
@@ -439,7 +435,7 @@ Envoy is the gateway. It publishes Keycloak under `/realms/` and the API under `
 
 ### 4.4 Configuration
 
-Routes are in `deploy/edge/envoy/envoy.yaml`. The secure overlay hides host `:8000` and `:8080`.
+On the gateway switch, host ports 8000 and 8080 are not published. The gateway answers on port 9000.
 
 ### 4.5 The filter chain
 
@@ -454,7 +450,7 @@ A request to a protected prefix hits the JWT filter, then the API. A request to 
 
 ### 4.6 Tasks
 
-**4.6.1 Ready**
+#### 4.6.1 Ready
 
 ```powershell
 (Invoke-WebRequest -Uri "http://localhost:9901/ready" -UseBasicParsing).StatusCode
@@ -468,7 +464,7 @@ A request to a protected prefix hits the JWT filter, then the API. A request to 
 curl.exe -sS -o NUL -w "%{http_code}" "http://localhost:9901/ready"
 ```
 
-**4.6.2 Realms**
+#### 4.6.2 Realms
 
 ```powershell
 (Invoke-WebRequest -Uri "http://localhost:9000/realms/nexus-test/.well-known/openid-configuration" -UseBasicParsing).StatusCode
@@ -516,7 +512,7 @@ Do not add a route for Keycloak `/admin/`.
 
 ### 5.1 What it is
 
-step-ca is the lab certificate authority. It is present when the stack is started with `-Mode dev-pki`. It listens on port `9000` inside its own container. That port is not the host's Envoy port `9000`.
+step-ca is the certificate authority. It is present when the PKI container is already running. It listens on port `9000` inside its own container. That port is not the host's gateway port `9000`.
 
 ### 5.2 What it provides
 
@@ -531,11 +527,11 @@ step-ca is the lab certificate authority. It is present when the stack is starte
 
 ### 5.4 Configuration
 
-The service is defined in `docker-compose.security.yaml`. The admin password file is mounted into the container and consumed as-is. The healthcheck runs `step ca health` against `https://localhost:9000` with the container's root certificate.
+The CA container is already running when this check applies. Its admin password file is inside the container. The health check runs `step ca health` against `https://localhost:9000` with the container's root certificate. The password is not printed.
 
 ### 5.5 Tasks
 
-**5.5.1 Health**
+#### 5.5.1 Health
 
 ```powershell
 docker exec auth-sandbox-step-ca-1 step ca health --ca-url https://localhost:9000 --root /home/step/certs/root_ca.crt
@@ -551,13 +547,13 @@ The container health status is `healthy` after the same probe succeeds.
 
 ### 5.7 Gotchas
 
-`:9000` inside this container is step-ca. `:9000` on the host is Envoy. Certificate issue and revoke scripts live in `devx/pki/`. They talk to the CA in its container.
+`:9000` inside this container is step-ca. `:9000` on the host is the gateway. A certificate check that needs the CA starts from the commands in this section. It does not replace the running containers.
 
 ## 6. Caddy (on-prem edge)
 
 ### 6.1 What it is
 
-On-prem, Caddy terminates HTTPS and forwards to Envoy. The lab modes in this guide do not start Caddy.
+On the production-shaped deployment, Caddy terminates HTTPS and forwards to the gateway. The lab ports in this guide are the host ports on this machine. Caddy is not part of that lab listener.
 
 ### 6.2 What it provides
 
@@ -566,7 +562,7 @@ On-prem, Caddy terminates HTTPS and forwards to Envoy. The lab modes in this gui
 
 ### 6.3 Configuration
 
-`docker-compose.onprem.yaml` and `deploy/onprem/Caddyfile`. Postgres for that stack is `authbox_production` on `pgdata_onprem`.
+That deployment joins the identity gateway and does not publish the lab ports 8000 and 8080. Postgres for that deployment is `authbox_production` on `pgdata_onprem`.
 
 ### 6.4 What else changes on-prem
 
@@ -574,62 +570,28 @@ The database name, the volume, and the public issuer change. The claim name rema
 
 ### 6.5 Tasks
 
-Bring-up is `.\devx\run-onprem-stack.ps1` from a checkout that has the on-prem env file in place. Health is still `GET /authbox/health` on the on-prem API base URL.
+Health is `GET /authbox/health` on the API base URL of the deployment that is already running.
 
 ### 6.6 Gotchas
 
-Do not point an on-prem stack at `pgdata_lab`. The lab file `docker-compose.postgres-lab.yaml` is for lab modes.
+The on-prem database volume is `pgdata_onprem`. The lab database volume is `pgdata_lab`. They are different databases.
 
 ---
 
 # Part II — The platform
 
-## 7. Modes and access paths
+## 7. Ports already open
 
-### 7.1 Which containers each mode runs
+The containers are already running. One switch in [SCENARIO-TESTING.md](SCENARIO-TESTING.md) selects which ports the later calls use. Pasting the other switch later changes every later call. Setting the switch does not start containers and does not replace the running set.
 
-| Mode | Postgres | Keycloak | API | Envoy | step-ca |
-|---|---|---|---|---|---|
-| `base`, `min` | lab singleton when merged | yes | yes | no | no |
-| `dev` | `authbox_lab` | yes | yes | yes | no |
-| `dev-secure` | `authbox_lab` | yes | yes | yes | no |
-| `dev-pki` | `authbox_lab` | yes | yes | yes | yes |
-| `dev-pki -WithFiwareLink` | `authbox_lab` | yes | yes | yes, plus `:1029` | yes |
+| Switch | API | Keycloak | Gateway | What else is open |
+|---|---|---|---|---|
+| Lab | `:8000` | `:8080` | `:9000` may also be open | Postgres `:5433`. Gateway admin `:9901`. step-ca only inside its container when that container is running. |
+| Gateway | unpublished | unpublished | `:9000` | Postgres `:5433`. Gateway admin `:9901`. Device mTLS `:1029` and MQTT `:8883` when those listeners are published. |
 
-`base` and `min` can run Keycloak on embedded H2 when the Postgres fragment is not merged. `sandbox-ctl` lab modes merge `authbox_lab`.
+The plain lab API listener is port 8000. The gateway listener is port 9000. The device listener, when published, is port 1029. Changing which set is running replaces that set. A short-lived check container is not that change.
 
-### 7.2 Which ports each mode opens
-
-| Mode | API | Keycloak | Envoy | Postgres | Envoy admin |
-|---|---|---|---|---|---|
-| `dev`, `dev-pki` | `:8000` | `:8080` | `:9000` | `:5433` | `:9901` |
-| `dev-secure`, FIWARE link | unpublished | unpublished | `:9000` | `:5433` | `:9901` |
-
-FIWARE link also publishes `:1029` and `:8883` on localhost.
-
-### 7.3 Choosing a mode
-
-Use `dev` when you want direct access and the gateway access together. Use `dev-secure` when callers should use `:9000` only. Add `-Mode dev-pki` when you want step-ca. Add `-WithFiwareLink` when Orion and the IoT agent are linked and device mTLS is on `:1029`.
-
-### 7.4 Commands for each mode
-
-```powershell
-.\devx\sandbox-ctl.ps1 up -Mode dev
-```
-
-```powershell
-.\devx\sandbox-ctl.ps1 up -Mode dev-secure
-```
-
-```powershell
-.\devx\sandbox-ctl.ps1 up -Mode dev-pki
-```
-
-```powershell
-.\devx\sandbox-ctl.ps1 up -Mode dev-pki -WithFiwareLink
-```
-
-The files that command reads are listed in [README.md](README.md). They are part of the repository clone. Private wheels in `dist/` and lab certificates are not in the clone.
+The production-shaped deployment joins the identity gateway and does not publish lab ports 8000 and 8080. Caddy terminates HTTPS in front of the gateway. The database is `authbox_production`.
 
 ## 8. How the services fit together
 
@@ -641,7 +603,7 @@ Keycloak owns the schema. User attributes, including `tenant_id` and `clearance`
 
 ### 8.2 How authbox-api works with Keycloak
 
-The browser login URL is built from the public issuer (`localhost` on the access path you launched). The API fetches signing keys from Keycloak inside the Docker network. Evaluate checks the token, requires claim `tid`, and returns the URL tenant in field `tenant_id`.
+The browser login URL is built from the public issuer on the switch you set. The API fetches signing keys from Keycloak inside the Docker network. Evaluate checks the token, requires claim `tid`, and returns the URL tenant in field `tenant_id`.
 
 Password grant and client credentials can be taken directly from Keycloak at `$KC/realms/nexus-test/protocol/openid-connect/token`, or through `POST .../auth/token` for client credentials and authorization-code exchange.
 
@@ -661,20 +623,21 @@ Envoy forwards `/realms/` to Keycloak and `/authbox/` to the API. JWT on `/authb
 | Envoy | `auth-sandbox-envoy-1` |
 | step-ca | `auth-sandbox-step-ca-1` |
 
-### 9.2 Default credentials (lab only)
+### 9.2 Environment names
 
-| Use | Value |
+Values are not written here. Set them in the session before the scenario pass. The names are listed in [README.md](README.md).
+
+| Use | Name |
 |---|---|
-| Postgres | `nexus` / `nexus_lab`, database `authbox_lab` |
-| Keycloak admin | `admin` / `admin` |
-| Client `nexus-sandbox` | `changeme` |
-| Client `nexus-m2m` | `changeme` |
-| `testuser` | `testpass`, attribute `tenant_id=tenant_a`, roles `admin` and `operator` |
-| `tenant_b_user` | `testpass`, attribute `tenant_id=tenant_b`, role `viewer` |
-| `iot-operator` | `operator123` |
-| `iot-device` | `device123` |
-| Edge `airuser` | no password, role `operator` |
-| Edge `airuser_protected` | `airpass`, role `reader` |
+| Database user, password, and database | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` |
+| Keycloak admin inside the Keycloak container | `KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD` |
+| Password-grant client | `NEXUS_AUTH_CLIENT_ID`, `NEXUS_AUTH_CLIENT_SECRET` |
+| Machine client | `NEXUS_SIMULATOR_M2M_CLIENT_ID`, `NEXUS_AUTH_M2M_CLIENT_SECRET` |
+| User whose claim `tid` is `tenant_a`, roles include `admin` and `operator` | `AUTHBOX_USER_A`, `AUTHBOX_USER_A_PASSWORD` |
+| User whose claim `tid` is `tenant_b`, role `viewer` | `AUTHBOX_USER_B`, `AUTHBOX_USER_B_PASSWORD` |
+| Edge user, role `operator`. Username alone is `401` | `AUTHBOX_EDGE_USER`, `AUTHBOX_EDGE_PASSWORD` |
+| Edge user, role `reader` | `AUTHBOX_EDGE_PROTECTED_USER`, `AUTHBOX_EDGE_PASSWORD` |
+| One-time secret inside the API container | `NEXUS_SIMULATOR_TOTP_SECRET` |
 
 ### 9.3 Health checks
 
@@ -692,20 +655,14 @@ Run [SCENARIO-TESTING.md](SCENARIO-TESTING.md) in the same session after `$Acces
 
 One failure line means that layer. A JSON `401` on evaluate with a fresh password-grant token means the token issuer and `NEXUS_AUTH_ISSUER` disagree, or claim `tid` is absent. A plain-text `401` means Envoy rejected the JWT before the API.
 
-## Appendix A — Where things are defined
+## Appendix A — Running containers
 
-| Thing | Defined in |
+| Container | What is open |
 |---|---|
-| Lab Postgres | `docker-compose.postgres-lab.yaml` |
-| Keycloak, API, Envoy | `docker-compose.dev.yaml` |
-| gateway access | `docker-compose.dev.secure.yaml` |
-| step-ca | `docker-compose.security.yaml` |
-| Device mTLS publish | `docker-compose.fiware-link.yaml` |
-| On-prem and Caddy | `docker-compose.onprem.yaml`, `deploy/onprem/Caddyfile` |
-| Realm and claim mappers | `src/seed_data.py` |
-| Routes | `src/routes/` |
-| Gateway routes | `deploy/edge/envoy/envoy.yaml` |
-| Edge users | image path `/app/tests/simulator/assets/discovery.json` |
-| Mode bring-up | `devx/sandbox-ctl.ps1` |
+| `auth-sandbox-postgres-1` | Lab database `authbox_lab` on host port 5433 when the lab ports are published |
+| `auth-sandbox-keycloak-1` | Realm `nexus-test`. Host port 8080 on the lab switch. On the gateway switch the host port is not published |
+| `auth-sandbox-authbox-api-1` | Image `gd-authbox-dev:latest`. Host port 8000 on the lab switch |
+| `auth-sandbox-envoy-1` | Host port 9000. Admin port 9901. Device port 1029 when that listener is published |
+| `auth-sandbox-step-ca-1` | Port 9000 inside the container, when that container is running |
 
 Related pages in this pack: [README.md](README.md), [RELEASE-NOTES.md](RELEASE-NOTES.md), [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md), [SCENARIO-TESTING.md](SCENARIO-TESTING.md).

@@ -16,19 +16,19 @@ flowchart TB
     device[Device client]
   end
 
-  subgraph direct [Direct access after up -Mode dev or dev-pki]
+  subgraph direct [Lab switch ports 8000 and 8080]
     apiHost["API host port 8000"]
     kcHost["Keycloak host port 8080"]
   end
 
-  subgraph edge [Gateway access after up -Mode dev-secure or -WithFiwareLink]
+  subgraph edge [Gateway switch port 9000]
     caddy[Caddy HTTPS on-prem]
     envoy["Envoy host port 9000"]
     admin["Envoy admin port 9901"]
     mtls["Device mTLS port 1029"]
   end
 
-  subgraph net [Compose network auth-sandbox]
+  subgraph net [Running containers]
     api["authbox-api container port 8000"]
     kc["Keycloak 24 realm nexus-test"]
     pg[("Postgres 16 authbox_lab volume pgdata_lab")]
@@ -57,7 +57,7 @@ flowchart TB
   ca -->|"device certificates"| envoy
 ```
 
-Direct access is what you have after `.\devx\sandbox-ctl.ps1 up -Mode dev` or `up -Mode dev-pki`. Call the API on port 8000 and Keycloak on port 8080. Those modes also publish Envoy on port 9000. Gateway access is what you have after `up -Mode dev-secure`, or when you add `-WithFiwareLink`. Host ports 8000 and 8080 are unpublished. Callers use port 9000 for both Keycloak and the API.
+The lab switch calls the API on port 8000 and Keycloak on port 8080. Host port 9000 may also be open. The gateway switch calls both on port 9000. Host ports 8000 and 8080 are not published on that switch. Setting the switch does not start containers and does not replace the running set.
 
 Envoy forwards `/authbox/` to the API and `/realms/` to Keycloak. On `/authbox/`, `/orion/`, and `/iotagent/` Envoy checks the JWT before the API sees the call. A missing JWT is plain text `Jwt is missing`. A JSON `401` `{"detail":"Missing or invalid token"}` is the API. Keycloak `/admin/` is not routed. Use `kcadm.sh` inside `auth-sandbox-keycloak-1`.
 
@@ -70,13 +70,11 @@ On-prem, Caddy terminates HTTPS and forwards to Envoy. That stack uses database 
 | Direct | `http://localhost:8080` | `http://localhost:8000` | `http://localhost:8080/realms/nexus-test` |
 | Gateway | `http://localhost:9000` | `http://localhost:9000` | `http://localhost:9000/realms/nexus-test` |
 
-| Mode | Access | Host ports |
-|---|---|---|
-| `base`, `min` | Direct | API `:8000`. Keycloak may use embedded H2 |
-| `dev`, `dev-pki` | Direct, and Envoy `:9000` is also published | Keycloak `:8080`, API `:8000`, Postgres `:5433` |
-| `dev-secure` | Gateway | `:9000`, Envoy admin `:9901`. Host `:8000` and `:8080` are unpublished |
-| `dev-pki -WithFiwareLink` | Gateway | `:9000`, `:1029` device mTLS, `:8883`, `:9901` |
-| on-prem | Caddy HTTPS, then Envoy | Database `authbox_production` |
+| Switch | Host ports |
+|---|---|
+| Lab | Keycloak `:8080`, API `:8000`, gateway `:9000` when that listener is published, Postgres `:5433` |
+| Gateway | `:9000`, gateway admin `:9901`. Host `:8000` and `:8080` are not published. Device mTLS `:1029` and MQTT `:8883` when those listeners are published |
+| Production-shaped | HTTPS in front of the gateway. Lab ports 8000 and 8080 are not published. Database `authbox_production` |
 
 Postgres host port on every lab mode is `5433`. Inside the compose network Keycloak uses `postgres:5432`.
 
@@ -107,20 +105,20 @@ A token whose `tid` claim is empty is rejected with `401` and body `{"detail":"M
 
 | Name | Secret or password | Grant | Realm roles |
 |---|---|---|---|
-| Client `nexus-sandbox` | `changeme` | Authorization code and password | — |
-| Client `nexus-m2m` | `changeme` | Client credentials | service account |
-| Client `iot-admin-app` | lab secret | Browser login | — |
-| Client `nodered` | lab secret | Browser login | — |
-| User `testuser` | `testpass` | Password | `admin`, `operator` |
-| User `tenant_b_user` | `testpass` | Password | `viewer` |
-| User `iot-operator` | `operator123` | Password | `operator` |
-| User `iot-device` | `device123` | Password | `device` |
-| Edge user `airuser` | none | `X-Username` on edge verify | manifest role `operator` |
-| Edge user `airuser_protected` | `airpass` | `X-Username` and `X-Password` | manifest role `reader` |
+| `NEXUS_AUTH_CLIENT_ID` | `NEXUS_AUTH_CLIENT_SECRET` | Authorization code and password | — |
+| `NEXUS_SIMULATOR_M2M_CLIENT_ID` | `NEXUS_AUTH_M2M_CLIENT_SECRET` | Client credentials | service account |
+| Client `iot-admin-app` | `NEXUS_AUTH_CLIENT_SECRET` | Browser login | — |
+| Client `nodered` | `NEXUS_AUTH_CLIENT_SECRET` | Browser login | — |
+| `AUTHBOX_USER_A` | `AUTHBOX_USER_A_PASSWORD` | Password | `admin`, `operator` |
+| `AUTHBOX_USER_B` | `AUTHBOX_USER_B_PASSWORD` | Password | `viewer` |
+| IoT operator user | `NEXUS_SIMULATOR_IOT_OPERATOR_PASSWORD` | Password | `operator` |
+| IoT device user | `NEXUS_SIMULATOR_IOT_DEVICE_PASSWORD` | Password | `device` |
+| `AUTHBOX_EDGE_USER` | `AUTHBOX_EDGE_PASSWORD` | `X-Username` and `X-Password` on edge verify. Username alone is `401` | manifest role `operator` |
+| `AUTHBOX_EDGE_PROTECTED_USER` | `AUTHBOX_EDGE_PASSWORD` | `X-Username` and `X-Password` | manifest role `reader` |
 
 Realm role names: `admin`, `operator`, `viewer`, `device`, `config_read`, `data_scientist`. `reader` is an edge-manifest role.
 
-Keycloak admin on the lab is `admin` / `admin`, used from inside the Keycloak container. The gateway does not publish `/admin/`.
+Keycloak admin commands run inside `auth-sandbox-keycloak-1` and read `KEYCLOAK_ADMIN` and `KEYCLOAK_ADMIN_PASSWORD` from that container. The gateway does not publish `/admin/`.
 
 ## Routes
 
@@ -141,7 +139,7 @@ Keycloak admin on the lab is `admin` / `admin`, used from inside the Keycloak co
 | `POST .../mfa/challenge` | Bearer, form `secret` | `200` `code` |
 | `POST .../mfa/verify` | Bearer, form `secret` and `verify_code` | `200` `valid` |
 | `POST .../control/v1/mocks/generate-otp` | none, direct access | form `mode` of `generate`, `code`, or `verify` |
-| `POST .../auth/edge/verify` | `X-Username`, optional `X-Password` | `200` `status` `success` |
+| `POST .../auth/edge/verify` | `X-Username` and `X-Password` | `200` `status` `success`. Username alone is `401` |
 | `POST .../auth/fiware/verify` | Bearer, optional correlation headers | `200` `status` `success` |
 | `POST .../auth/iudx/verify` | Bearer, optional correlation headers | `200`, copies consent id and catalogue access |
 | `POST .../auth/aadhaar/verify` | `X-Aadhaar-Xml` | `501` while no UIDAI key is configured |
@@ -210,40 +208,53 @@ Gateway prefixes are `/authbox/`, `/realms/`, `/orion/`, and `/iotagent/`. Keycl
 Password grant, sent to `$KC/realms/nexus-test/protocol/openid-connect/token`:
 
 ```text
-grant_type=password&client_id=nexus-sandbox&client_secret=changeme&username=testuser&password=testpass
+grant_type=password, client_id from NEXUS_AUTH_CLIENT_ID, client_secret from NEXUS_AUTH_CLIENT_SECRET, username from AUTHBOX_USER_A, password from AUTHBOX_USER_A_PASSWORD
 ```
 
 Client credentials, same URL:
 
 ```text
-grant_type=client_credentials&client_id=nexus-m2m&client_secret=changeme
+grant_type=client_credentials, client_id from NEXUS_SIMULATOR_M2M_CLIENT_ID, client_secret from NEXUS_AUTH_M2M_CLIENT_SECRET
 ```
 
 API token, `POST $API/authbox/default/default/api/v1/auth/token`:
 
 | `grant_type` | Fields |
 |---|---|
-| `client_credentials` | `client_id`, `client_secret`. Omitted values use `nexus-sandbox` / `changeme` |
+| `client_credentials` | `client_id` and `client_secret`. An omitted field uses `NEXUS_AUTH_CLIENT_ID` and `NEXUS_AUTH_CLIENT_SECRET` already set in the API process. If either is empty, the response is `400` and the detail is `client_id and client_secret are required` |
 | `authorization_code` | `code`, `code_verifier`, `redirect_uri` |
 
 ## Environment on `authbox-api`
 
-| Variable | Direct (`dev`) | Gateway (`dev-secure`) |
+| Variable | Lab switch | Gateway switch |
 |---|---|---|
 | `NEXUS_AUTH_ISSUER` | `http://localhost:8080/realms/nexus-test` | `http://localhost:9000/realms/nexus-test` |
 | `NEXUS_AUTH_INTERNAL_ISSUER` | `http://keycloak:8080/realms/nexus-test` | same |
 | `NEXUS_AUTH_FIWARE_JWKS_URL` | `http://keycloak:8080/realms/nexus-test/protocol/openid-connect/certs` | same |
-| `NEXUS_AUTH_CLIENT_ID` | `nexus-sandbox` | same |
-| `NEXUS_AUTH_CLIENT_SECRET` | `changeme` | same |
+| `NEXUS_AUTH_CLIENT_ID` | set in the container | same |
+| `NEXUS_AUTH_CLIENT_SECRET` | set in the container | same |
 | `NEXUS_AUTH_AUDIENCE` | `account` | same |
-| `NEXUS_AUTH_M2M_CLIENT_SECRET` | `changeme` | same |
+| `NEXUS_AUTH_M2M_CLIENT_SECRET` | set in the container | same |
 | `NEXUS_AUTH_ALLOW_HTTP_SANDBOX` | `true` | `true` |
 | `NEXUS_AUTH_ROLE_CLAIM` | `realm_access` | same |
-| `NEXUS_SIMULATOR_TOTP_SECRET` | `JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP` | same |
+| `NEXUS_SIMULATOR_TOTP_SECRET` | set in the container | same |
 | `NEXUS_AUTH_CONTINUOUS_VERIFY` | `true` | same |
 | `NEXUS_AUTH_SESSION_MAX_AGE_MINUTES` | `30` | same |
 
 The tenant claim name the API reads is `tid`.
+
+If any of these is empty inside the API container, seed stops and the API process does not stay up: `KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD`, `NEXUS_AUTH_CLIENT_SECRET`, `NEXUS_AUTH_M2M_CLIENT_SECRET`, `NEXUS_SIMULATOR_KEYCLOAK_PASSWORD`, `NEXUS_SIMULATOR_TENANT_B_PASSWORD`, `NEXUS_SIMULATOR_IOT_OPERATOR_PASSWORD`, `NEXUS_SIMULATOR_IOT_DEVICE_PASSWORD`. The scenario names `AUTHBOX_USER_A_PASSWORD`, `AUTHBOX_USER_B_PASSWORD`, and `AUTHBOX_EDGE_PASSWORD` are the caller's copies of those values. The image does not invent a value when one of the container variables is empty.
+
+## How long state lasts
+
+These lists are inside the API process. Replacing that container clears them. The numbered pass does not request a device certificate, so it does not depend on certificate lifetime.
+
+| State | How long it lasts | After it ends |
+|---|---|---|
+| Continuous-verify session | 30 minutes (`NEXUS_AUTH_SESSION_MAX_AGE_MINUTES`) | The numbered pass does not wait out that window |
+| Device trust from register | `ttl_sec` seconds. The default is 86400. `ttl_sec` of 0 is `400` with detail `ttl_sec must be > 0` | `GET .../auth/device-trust/{device_id}` returns `200` and `trust_level` is empty |
+| Device trust from suspend | Until revoke, or until the API process is replaced | `trust_level` is `suspended` while the entry remains |
+| Revoked-token list | Until the access token's expiry. A token with no expiry stays on the list for 3600 seconds | While the entry remains, `GET .../auth/m2m/ping` is `401` and the detail is `token_revoked`. After the entry is gone, that detail is not returned for this reason |
 
 ## Data and networks
 
@@ -251,7 +262,7 @@ The tenant claim name the API reads is `tid`.
 |---|---|---|
 | Database | `authbox_lab` | `authbox_production` |
 | Volume | `pgdata_lab` | `pgdata_onprem` |
-| User / password | `nexus` / `nexus_lab` | `nexus` / `nexus_prod` |
+| User / password | `POSTGRES_USER` / `POSTGRES_PASSWORD` | `POSTGRES_USER` / `POSTGRES_PASSWORD` |
 | Healthcheck | `pg_isready -U nexus -d authbox_lab` | `pg_isready` with `authbox_production` |
 
 | Network | Who is on it |
@@ -262,21 +273,6 @@ The tenant claim name the API reads is `tid`.
 
 The API has no Postgres connection. Realms, users, clients, and sessions are Keycloak's tables. Audit goes to the API log and to `/var/log/authbox/sandbox.csv`. Continuous-verification session state is inside the API process. Session max age is 30 minutes.
 
-## Where each thing is defined
+## Images
 
-| Thing | Defined in |
-|---|---|
-| Lab Postgres | `docker-compose.postgres-lab.yaml` |
-| Keycloak, API, Envoy | `docker-compose.dev.yaml` |
-| gateway access, hidden host ports | `docker-compose.dev.secure.yaml` |
-| step-ca | `docker-compose.security.yaml` |
-| `:1029` and `:8883` | `docker-compose.fiware-link.yaml` |
-| On-prem and Caddy | `docker-compose.onprem.yaml`, `deploy/onprem/Caddyfile` |
-| Realm, clients, users, mappers | `src/seed_data.py` |
-| Startup and seed | `src/entrypoint.sh` |
-| Routes | `src/routes/` |
-| Gateway routes | `deploy/edge/envoy/envoy.yaml` |
-| Edge manifest | `tests/assets` copied to `/app/tests/simulator/assets/discovery.json` |
-| Bring-up | `devx/sandbox-ctl.ps1` |
-
-A clone of this repository contains the rows above. `dist/` wheels and `deploy/edge/envoy/certs-lab/` are not in the clone. Building the image on that machine needs the wheels placed in `dist/` first, or an image that was already built.
+This pack describes the API image `gd-authbox-dev:latest`. Keycloak `quay.io/keycloak/keycloak:24.0` and Postgres `postgres:16-alpine` stay upstream. A browser UI is not one of these images. The lab switch is the plain listener on ports 8000 and 8080. The gateway switch is port 9000. Device mTLS on port 1029 is present only when that listener is already published.

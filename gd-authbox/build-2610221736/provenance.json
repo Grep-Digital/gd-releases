@@ -3,7 +3,7 @@
   "build_id": "build-2610221736",
   "internal_release": "2.1.0",
   "leaf": "platforms/gd-authbox-v21",
-  "leaf_sha": "8f177407bf34edc7ff9d4fafe4b85d92a0e88990",
+  "leaf_sha": "0c177649a22decebb105526342324ab83c475911",
   "image": "ghcr.io/grep-digital/gd-authbox:build-2610221736",
   "also_tag_latest": false,
   "kind": "wheel-image",
