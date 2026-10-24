@@ -6,6 +6,13 @@
       "internal_release": "2.1.0",
       "leaf_sha": "8f177407bf34edc7ff9d4fafe4b85d92a0e88990",
       "image": "ghcr.io/grep-digital/gd-authbox:build-2610221736"
+    },
+    {
+      "distribution_id": "gd-fiwarebox",
+      "build_id": "build-2610240514",
+      "internal_release": "2.1.7",
+      "leaf_sha": "ab81d7f6f122f980c74607268cc112e30fb87f4e",
+      "image": null
     }
   ]
 }

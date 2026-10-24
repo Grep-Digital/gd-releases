@@ -1,0 +1,18 @@
+{
+  "distribution_id": "gd-fiwarebox",
+  "build_id": "build-2610240514",
+  "internal_release": "2.1.7",
+  "leaf": "platforms/gd-fiwarebox-v21",
+  "leaf_sha": "ab81d7f6f122f980c74607268cc112e30fb87f4e",
+  "image": null,
+  "also_tag_latest": false,
+  "kind": "many-dockerfiles",
+  "dockerfiles": [
+    "iotagent/Dockerfile",
+    "mediamtx/Dockerfile",
+    "mosquitto/Dockerfile",
+    "nodered/Dockerfile"
+  ],
+  "wheel_deps": [],
+  "documentation": "https://github.com/Grep-Digital/grdd-artefacts"
+}
