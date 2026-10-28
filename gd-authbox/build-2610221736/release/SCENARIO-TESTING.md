@@ -2,9 +2,15 @@
 
 Each section below is one flow: the diagram, then the same call in curl.exe and in Postman, then the Windows PowerShell 5.1 or PowerShell 7 line that records `PASS`, `FAIL`, or `SKIP`. The PowerShell line is a single line and prints the observed value.
 
-The containers are already running. Set one switch. Pasting the other switch later changes every later call. Setting the switch does not start containers and does not replace the running set. Full coverage uses the **lab** switch (Keycloak on port 8080, API on port 8000). On the **gateway** switch (both on port 9000), scenarios that send no bearer record `SKIP`. A new window has no variables and no result list. Paste from this setup downward in one session.
+This pack publishes **three builds**. Progress through them in order. One session per build (or one session that reassigns `$Build` after the installed set has changed). Setting `$Build` does not start containers and does not replace the running set. A new window has no variables and no result list. Paste from Setup downward in one session.
 
-Contracts: [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). Service background: [USER-GUIDE.md](USER-GUIDE.md).
+| Phase | Build | `$Access` | What this phase covers |
+|---|---|---|---|
+| 1 | **Base** | `direct` | Full numbered pass S-01…S-85 (plus S-29b). Lab ports `:8080` / `:8000` |
+| 2 | **Base Secure** | `gateway` | Remint tokens on `:9000`. Bearer scenarios PASS. No-bearer / direct-only scenarios `SKIP`. Lab ports closed |
+| 3 | **Base PKI** | `gateway` | Same as Base Secure, plus step-ca health and optional device-port tips. Device-trust HTTP scenarios S-75…S-83 still apply |
+
+Contents, defaults, and health: [USER-GUIDE.md](USER-GUIDE.md). Contracts: [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). Starters: [helpers/README.md](helpers/README.md). Index: [README.md](README.md).
 
 ## Contents
 
@@ -25,22 +31,31 @@ Contracts: [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). Service background:
 | [MCP](#mcp) | S-65 to S-72 |
 | [Login flow](#login-flow) | S-73 to S-74 |
 | [Device trust and revoke](#device-trust-and-revoke) | S-75 to S-85 |
+| [Progressive builds](#progressive-builds) | Base → Base Secure → Base PKI |
 | [Results](#results) | the table |
 
-The numbered pass is S-01 through S-85, plus S-29b.
+The numbered pass is S-01 through S-85, plus S-29b. Progressive build checks are B-01 through B-06.
 
 ## Setup
 
-Lab switch. The API is already listening on port 8000 and Keycloak on port 8080. This assignment does not start containers.
+Choose the build that is already installed. Or dot-source [helpers/set-build.ps1](helpers/set-build.ps1). This assignment does not start containers.
+
+**Phase 1 — Base** (lab ports open; full pass):
 
 ```powershell
-$Access = "direct"; $KC = "http://localhost:8080"; $API = "http://localhost:8000"
+$Build = "base"; $Access = "direct"; $KC = "http://localhost:8080"; $API = "http://localhost:8000"
 ```
 
-Gateway switch. Both are already listening on port 9000. This assignment does not replace the running set.
+**Phase 2 — Base Secure** (gateway only; direct-only scenarios SKIP):
 
 ```powershell
-$Access = "gateway"; $KC = "http://localhost:9000"; $API = "http://localhost:9000"
+$Build = "base-secure"; $Access = "gateway"; $KC = "http://localhost:9000"; $API = "http://localhost:9000"
+```
+
+**Phase 3 — Base PKI** (gateway + step-ca; same SKIP set as Base Secure, then B-04…B-06):
+
+```powershell
+$Build = "base-pki"; $Access = "gateway"; $KC = "http://localhost:9000"; $API = "http://localhost:9000"
 ```
 
 ```powershell
@@ -77,7 +92,7 @@ $TokenM = (Invoke-RestMethod -Method Post -Uri "$KC/realms/nexus-test/protocol/o
 
 Postman environment for this session:
 
-| Variable | Direct access | Gateway access |
+| Variable | Base (`direct`) | Base Secure / Base PKI (`gateway`) |
 |---|---|---|
 | `api` | `http://localhost:8000` | `http://localhost:9000` |
 | `keycloak` | `http://localhost:8080` | `http://localhost:9000` |
@@ -1576,13 +1591,67 @@ $ok = Invoke-Api POST "$API/authbox/default/default/api/v1/auth/token/revoke" @{
 > 200 revoked 401
 > ```
 
+## Progressive builds
+
+Run Phase 1 on **Base** first (full S-01…S-85). Then install **Base Secure**, reassign setup, remint `$TokenA` / `$TokenB` / `$TokenM`, and re-run the bearer groups that matter for gateway access (Health S-01, Evaluate S-16…S-23, Machine tokens, FIWARE/IUDX/MCP with bearer, Device trust S-75…S-85). Direct-only ids record `SKIP`. Then install **Base PKI**, reassign setup, remint tokens, repeat the Base Secure gateway pass, and add B-04…B-06.
+
+Cross-references: ports and defaults [USER-GUIDE.md](USER-GUIDE.md) §7 and §9; listening matrix [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md); tips [helpers/README.md](helpers/README.md).
+
+**B-01.** Base health: Postgres ready, API `:8000` health `ok`, Keycloak discovery `:8080`, Envoy admin `:9901/ready`.
+
+Already running: **Base**. Reads nothing.
+
+```powershell
+if ($Build -ne "base") { Add-Check "B-01" "SKIP" } else { $pg = docker exec auth-sandbox-postgres-1 pg_isready -U nexus -d authbox_lab; $health = Invoke-RestMethod "$API/authbox/health"; $kc = (Invoke-WebRequest -Uri "$KC/realms/nexus-test/.well-known/openid-configuration" -UseBasicParsing).StatusCode; $en = (Invoke-WebRequest -Uri "http://localhost:9901/ready" -UseBasicParsing).StatusCode; "pg=$pg api=$($health.status) kc=$kc en=$en"; Add-Check "B-01" $(if (("$pg" -match "accepting") -and $health.status -eq "ok" -and $kc -eq 200 -and $en -eq 200) { "PASS" } else { "FAIL" }) }
+```
+
+**B-02.** Base Secure: lab TCP `:8000` and `:8080` closed; gateway health `ok`.
+
+Already running: **Base Secure**. Reads nothing.
+
+```powershell
+if ($Build -ne "base-secure") { Add-Check "B-02" "SKIP" } else { function Test-Tcp([int]$Port) { try { $c = New-Object Net.Sockets.TcpClient; $iar = $c.BeginConnect("127.0.0.1",$Port,$null,$null); $ok = $iar.AsyncWaitHandle.WaitOne(500,$false); if ($ok) { $c.EndConnect($iar) | Out-Null }; $c.Close(); return $ok } catch { return $false } }; $open = (Test-Tcp 8000) -or (Test-Tcp 8080); $health = Invoke-RestMethod "http://localhost:9000/authbox/health"; "lab_open=$open api=$($health.status)"; Add-Check "B-02" $(if (-not $open -and $health.status -eq "ok") { "PASS" } else { "FAIL" }) }
+```
+
+**B-03.** Base Secure / Base PKI: missing bearer on a protected path is plain-text Envoy `401` (`Jwt is missing`).
+
+Already running: gateway build. Reads nothing. No bearer.
+
+```powershell
+if ($Access -ne "gateway") { Add-Check "B-03" "SKIP" } else { $r = Invoke-Api GET "$API/authbox/default/default/api/v1/verifier/evaluate"; "$($r.StatusCode) $($r.Content)"; Add-Check "B-03" $(if ($r.StatusCode -eq 401 -and ("$($r.Content)" -match "Jwt is missing")) { "PASS" } else { "FAIL" }) }
+```
+
+**B-04.** Base PKI: step-ca health returns `ok` inside `auth-sandbox-step-ca-1`.
+
+Already running: **Base PKI**. Reads nothing. Tip script: [helpers/tip-stepca-health.ps1](helpers/tip-stepca-health.ps1).
+
+```powershell
+if ($Build -ne "base-pki") { Add-Check "B-04" "SKIP" } else { $out = docker exec auth-sandbox-step-ca-1 step ca health --ca-url https://localhost:9000 --root /home/step/certs/root_ca.crt; "$out"; Add-Check "B-04" $(if ("$out" -match "ok") { "PASS" } else { "FAIL" }) }
+```
+
+**B-05.** Base PKI optional device ports: report TCP `:1029` / `:8883` open or closed (closed is not a FAIL when listeners are unpublished).
+
+Already running: **Base PKI**. Tip script: [helpers/tip-mtls-ports.ps1](helpers/tip-mtls-ports.ps1).
+
+```powershell
+if ($Build -ne "base-pki") { Add-Check "B-05" "SKIP" } else { function Test-Tcp([int]$Port) { try { $c = New-Object Net.Sockets.TcpClient; $iar = $c.BeginConnect("127.0.0.1",$Port,$null,$null); $ok = $iar.AsyncWaitHandle.WaitOne(500,$false); if ($ok) { $c.EndConnect($iar) | Out-Null }; $c.Close(); return $ok } catch { return $false } }; $a = if (Test-Tcp 1029) { "open" } else { "closed" }; $b = if (Test-Tcp 8883) { "open" } else { "closed" }; "1029=$a 8883=$b"; Add-Check "B-05" "PASS" }
+```
+
+**B-06.** Base PKI: gateway health still `ok` after step-ca is present; then continue device-trust S-75…S-83 on this same `$API`.
+
+Already running: **Base PKI**. Reads nothing. Cross-ref [Device trust and revoke](#device-trust-and-revoke).
+
+```powershell
+if ($Build -ne "base-pki") { Add-Check "B-06" "SKIP" } else { $health = Invoke-RestMethod "$API/authbox/health"; $en = (Invoke-WebRequest -Uri "http://localhost:9901/ready" -UseBasicParsing).StatusCode; "api=$($health.status) en=$en"; Add-Check "B-06" $(if ($health.status -eq "ok" -and $en -eq 200) { "PASS" } else { "FAIL" }) }
+```
+
 ## Results
 
 ```powershell
 $Results | Format-Table -AutoSize; "PASS=$((@($Results | Where-Object Result -eq 'PASS')).Count) FAIL=$((@($Results | Where-Object Result -eq 'FAIL')).Count) SKIP=$((@($Results | Where-Object Result -eq 'SKIP')).Count)"
 ```
 
-On the lab switch the SKIP count is `0`. On the gateway switch, S-02, S-03, S-31 through S-47, S-58 through S-64, and S-74 are `SKIP`. A `FAIL` line is the scenario id to rerun on its own. Setting the switch does not start containers.
+On **Base** (`$Access` `direct`) the S-* SKIP count is `0`; B-02…B-06 are `SKIP`. On **Base Secure**, S-02, S-03, S-31 through S-47, S-58 through S-64, and S-74 are `SKIP`; B-01 and B-04…B-06 are `SKIP`. On **Base PKI**, the same S-* SKIP set as Base Secure; B-01 and B-02 are `SKIP`; B-03…B-06 run. A `FAIL` line is the scenario id to rerun on its own. Setting `$Build` does not start containers.
 
 ## Scenario index
 
@@ -1674,3 +1743,9 @@ On the lab switch the SKIP count is `0`. On the gateway switch, S-02, S-03, S-31
 | S-83 | Device trust, `ttl_sec` 0 |
 | S-84 | Token revoke, wrong secret |
 | S-85 | Token revoke, then ping fails |
+| B-01 | Base health |
+| B-02 | Base Secure lab ports closed |
+| B-03 | Gateway Jwt is missing |
+| B-04 | Base PKI step-ca health |
+| B-05 | Base PKI device port tip |
+| B-06 | Base PKI gateway still healthy |

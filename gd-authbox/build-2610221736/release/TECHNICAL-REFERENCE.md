@@ -1,9 +1,26 @@
 # Auth-in-a-Box — technical reference
 
-Contracts for the product described in [USER-GUIDE.md](USER-GUIDE.md). The executable pass is [SCENARIO-TESTING.md](SCENARIO-TESTING.md).
+Contracts for the **three builds** described in [USER-GUIDE.md](USER-GUIDE.md) and [README.md](README.md). The progressive pass is [SCENARIO-TESTING.md](SCENARIO-TESTING.md). Quick tips: [helpers/README.md](helpers/README.md).
 
 The API prefix below is `/authbox/{tenant}/{instance}/api/v1`. The seeded path is `/authbox/default/default/api/v1`.
 
+## Three builds (listening matrix)
+
+Containers for one build are already running. Changing the installed build replaces that set. A short-lived check container is not that change.
+
+| Build | `$Build` | Host `:8080` / `:8000` | Gateway `:9000` / admin `:9901` | step-ca | Device `:1029` / `:8883` |
+|---|---|---|---|---|---|
+| **Base** | `base` | published | published | absent | absent |
+| **Base Secure** | `base-secure` | unpublished | published | absent | absent |
+| **Base PKI** | `base-pki` | unpublished | published | present | optional when published |
+
+| Build | Components present | Default issuer the API expects |
+|---|---|---|
+| Base | Postgres, Keycloak, authbox-api, Envoy | `http://localhost:8080/realms/nexus-test` (gateway also open) |
+| Base Secure | Same containers; lab ports unpublished | `http://localhost:9000/realms/nexus-test` |
+| Base PKI | Base Secure + step-ca | `http://localhost:9000/realms/nexus-test` |
+
+Postgres on every lab build: database `authbox_lab`, volume `pgdata_lab`, host `:5433`. Inside the network Keycloak uses `postgres:5432`. Defaults and health: [USER-GUIDE.md](USER-GUIDE.md) §1–§5 and §9.
 
 ## Layout
 
@@ -16,12 +33,12 @@ flowchart TB
     device[Device client]
   end
 
-  subgraph direct [Lab switch ports 8000 and 8080]
+  subgraph basePorts [Base host ports 8000 and 8080]
     apiHost["API host port 8000"]
     kcHost["Keycloak host port 8080"]
   end
 
-  subgraph edge [Gateway switch port 9000]
+  subgraph edge [All builds: gateway port 9000]
     caddy[Caddy HTTPS on-prem]
     envoy["Envoy host port 9000"]
     admin["Envoy admin port 9901"]
@@ -32,7 +49,7 @@ flowchart TB
     api["authbox-api container port 8000"]
     kc["Keycloak 24 realm nexus-test"]
     pg[("Postgres 16 authbox_lab volume pgdata_lab")]
-    ca["step-ca container port 9000"]
+    ca["step-ca on Base PKI container port 9000"]
   end
 
   ps --> apiHost
@@ -57,26 +74,26 @@ flowchart TB
   ca -->|"device certificates"| envoy
 ```
 
-The lab switch calls the API on port 8000 and Keycloak on port 8080. Host port 9000 may also be open. The gateway switch calls both on port 9000. Host ports 8000 and 8080 are not published on that switch. Setting the switch does not start containers and does not replace the running set.
+**Base** calls the API on port 8000 and Keycloak on port 8080. Host port 9000 is also open. **Base Secure** and **Base PKI** call both on port 9000; host ports 8000 and 8080 are unpublished. Setting `$Build` / `$Access` in the session does not start containers and does not replace the running set.
 
 Envoy forwards `/authbox/` to the API and `/realms/` to Keycloak. On `/authbox/`, `/orion/`, and `/iotagent/` Envoy checks the JWT before the API sees the call. A missing JWT is plain text `Jwt is missing`. A JSON `401` `{"detail":"Missing or invalid token"}` is the API. Keycloak `/admin/` is not routed. Use `kcadm.sh` inside `auth-sandbox-keycloak-1`.
 
-On-prem, Caddy terminates HTTPS and forwards to Envoy. That stack uses database `authbox_production` and volume `pgdata_onprem`. Lab modes use `authbox_lab` on `pgdata_lab`, published on host port 5433. The API does not open a database connection. step-ca listens on port 9000 inside its container. That port is not host Envoy port 9000.
+On-prem, Caddy terminates HTTPS and forwards to Envoy. That stack uses database `authbox_production` and volume `pgdata_onprem`. It is outside the three lab builds. The API does not open a database connection. step-ca listens on port 9000 inside its container. That port is not host Envoy port 9000.
 
-## Access paths
+## Access paths by build
 
-| Access | Keycloak base `$KC` | API base `$API` | Token issuer |
-|---|---|---|---|
-| Direct | `http://localhost:8080` | `http://localhost:8000` | `http://localhost:8080/realms/nexus-test` |
-| Gateway | `http://localhost:9000` | `http://localhost:9000` | `http://localhost:9000/realms/nexus-test` |
+| Build | `$Access` | Keycloak base `$KC` | API base `$API` | Token issuer |
+|---|---|---|---|---|
+| Base | `direct` | `http://localhost:8080` | `http://localhost:8000` | `http://localhost:8080/realms/nexus-test` |
+| Base Secure | `gateway` | `http://localhost:9000` | `http://localhost:9000` | `http://localhost:9000/realms/nexus-test` |
+| Base PKI | `gateway` | `http://localhost:9000` | `http://localhost:9000` | `http://localhost:9000/realms/nexus-test` |
 
-| Switch | Host ports |
+| Build | Host ports that matter |
 |---|---|
-| Lab | Keycloak `:8080`, API `:8000`, gateway `:9000` when that listener is published, Postgres `:5433` |
-| Gateway | `:9000`, gateway admin `:9901`. Host `:8000` and `:8080` are not published. Device mTLS `:1029` and MQTT `:8883` when those listeners are published |
-| Production-shaped | HTTPS in front of the gateway. Lab ports 8000 and 8080 are not published. Database `authbox_production` |
-
-Postgres host port on every lab mode is `5433`. Inside the compose network Keycloak uses `postgres:5432`.
+| Base | Keycloak `:8080`, API `:8000`, gateway `:9000`, admin `:9901`, Postgres `:5433` |
+| Base Secure | `:9000`, `:9901`, Postgres `:5433`. Host `:8000` and `:8080` unpublished |
+| Base PKI | Same as Base Secure, plus step-ca inside its container. Device `:1029` / MQTT `:8883` when those listeners are published |
+| Production-shaped (not a lab build) | HTTPS in front of the gateway. Database `authbox_production` |
 
 ## Claims
 
@@ -226,7 +243,7 @@ API token, `POST $API/authbox/default/default/api/v1/auth/token`:
 
 ## Environment on `authbox-api`
 
-| Variable | Lab switch | Gateway switch |
+| Variable | Base | Base Secure / Base PKI |
 |---|---|---|
 | `NEXUS_AUTH_ISSUER` | `http://localhost:8080/realms/nexus-test` | `http://localhost:9000/realms/nexus-test` |
 | `NEXUS_AUTH_INTERNAL_ISSUER` | `http://keycloak:8080/realms/nexus-test` | same |
@@ -258,7 +275,7 @@ These lists are inside the API process. Replacing that container clears them. Th
 
 ## Data and networks
 
-| Item | Lab | On-prem |
+| Item | Lab builds (all three) | On-prem |
 |---|---|---|
 | Database | `authbox_lab` | `authbox_production` |
 | Volume | `pgdata_lab` | `pgdata_onprem` |
@@ -275,4 +292,4 @@ The API has no Postgres connection. Realms, users, clients, and sessions are Key
 
 ## Images
 
-This pack describes the API image `gd-authbox-dev:latest`. Keycloak `quay.io/keycloak/keycloak:24.0` and Postgres `postgres:16-alpine` stay upstream. A browser UI is not one of these images. The lab switch is the plain listener on ports 8000 and 8080. The gateway switch is port 9000. Device mTLS on port 1029 is present only when that listener is already published.
+This pack describes the API image `gd-authbox-dev:latest`. Keycloak `quay.io/keycloak/keycloak:24.0` and Postgres `postgres:16-alpine` stay upstream. A browser UI is not one of these images. **Base** publishes ports 8000 and 8080 (and gateway 9000). **Base Secure** and **Base PKI** publish gateway 9000 only. Device mTLS on port 1029 is present only when that listener is already published on Base PKI. Starters: [helpers/README.md](helpers/README.md).

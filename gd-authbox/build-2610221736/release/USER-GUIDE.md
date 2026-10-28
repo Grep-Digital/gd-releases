@@ -1,6 +1,6 @@
 # Auth-in-a-Box — every service, explained
 
-What each container is, what it gives you, and how to call it.
+What each **build** installs, what each container is, the defaults it ships with, how to health-check it, and how to call it.
 
 HTTP examples are shown three ways: **curl.exe**, **Postman**, and **Windows PowerShell 5.1 or PowerShell 7**. PowerShell commands are a single line. In PowerShell the name `curl` is an alias for `Invoke-WebRequest`, so the REST examples use `curl.exe`.
 
@@ -14,36 +14,168 @@ docker exec auth-sandbox-postgres-1 pg_isready -U nexus -d authbox_lab
 > /var/run/postgresql:5432 - accepting connections
 > ```
 
-Set one switch once per session. The containers are already running. Setting the switch does not start containers and does not replace the running set. The contract for claims, routes, and status codes is [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). The full pass is [SCENARIO-TESTING.md](SCENARIO-TESTING.md).
+There are **three builds**. Choose one per session. The contract for claims, routes, and status codes is [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). The progressive pass is [SCENARIO-TESTING.md](SCENARIO-TESTING.md). Quick scripts: [helpers/README.md](helpers/README.md). Index: [README.md](README.md).
 
-| Switch | Keycloak `$KC` | API `$API` |
+## Three builds
+
+| Build | `$Build` | `$KC` / `$API` | Present |
+|---|---|---|---|
+| **Base** | `base` | `http://localhost:8080` / `http://localhost:8000` (gateway `:9000` also open) | Postgres, Keycloak, API, Envoy |
+| **Base Secure** | `base-secure` | both `http://localhost:9000` | Same; host `:8080`/`:8000` unpublished |
+| **Base PKI** | `base-pki` | both `http://localhost:9000` | Base Secure + step-ca (+ optional device `:1029`/`:8883`) |
+
+```powershell
+$Build = "base"; $KC = "http://localhost:8080"; $API = "http://localhost:8000"
+```
+
+```powershell
+$Build = "base-secure"; $KC = "http://localhost:9000"; $API = "http://localhost:9000"
+```
+
+```powershell
+$Build = "base-pki"; $KC = "http://localhost:9000"; $API = "http://localhost:9000"
+```
+
+The issuer on the API must be the same host as `$KC`. Base uses `http://localhost:8080/realms/nexus-test`. Base Secure and Base PKI use `http://localhost:9000/realms/nexus-test`.
+
+### Build matrix — defaults that matter
+
+| Setting | Base | Base Secure | Base PKI |
+|---|---|---|---|
+| Postgres DB name | `authbox_lab` | `authbox_lab` | `authbox_lab` |
+| Postgres host port | `5433` | `5433` | `5433` |
+| Keycloak realm | `nexus-test` | `nexus-test` | `nexus-test` |
+| Public issuer host | `:8080` (lab) | `:9000` (gateway) | `:9000` (gateway) |
+| API redirect / gateway URL | may use lab or gateway | gateway `:9000` | gateway `:9000` |
+| step-ca | absent | absent | present (container-only `:9000`) |
+| Device listeners | absent | absent | optional when published |
+
+Environment **names** (not values) are in [README.md](README.md). Component defaults and health are under each service below and in [§9](#9-cross-service-reference).
+
+### Per-build health (first check)
+
+| Build | Minimum health |
+|---|---|
+| Base | Postgres `pg_isready`; `GET http://localhost:8000/authbox/health`; Keycloak discovery on `:8080`; Envoy `http://localhost:9901/ready`; optional `GET http://localhost:9000/authbox/health` |
+| Base Secure | Postgres; `GET http://localhost:9000/authbox/health`; Envoy admin `:9901/ready`; TCP to `:8000`/`:8080` must fail |
+| Base PKI | Same as Base Secure, plus [§5.5.1](#551-health) step-ca `ok` |
+
+Or run [helpers/health-build.ps1](helpers/health-build.ps1) after [helpers/set-build.ps1](helpers/set-build.ps1).
+
+## Starting each build
+
+Yes — start, stop, and Docker options for each build live in this guide. The API image alone (`docker run` of `gd-authbox-dev:latest`) is not a supported install: the process waits for Keycloak on the compose network. Use one of the three builds below.
+
+### Prerequisites
+
+- Docker Engine with Compose v2
+- Windows PowerShell 5.1 / PowerShell 7, or bash
+- This product checkout (compose files and the lab controller ship with the clone; they are not inside `release/`)
+- A repo-root `.env` whose **names** match [README.md](README.md). Do not paste secret values into this guide. Copy from `.env.example` when `.env` is missing, then set the secrets yourself
+
+Optional: set `SANDBOX_IMAGE` to a published API tag (for example a GHCR build) before start. When unset, the compose file uses the local image name `gd-authbox-dev:latest`.
+
+### What each start brings up
+
+| Build | Compose overlays (in order) | Containers | Host ports after start |
+|---|---|---|---|
+| **Base** | lab Postgres + `docker-compose.dev.yaml` | Postgres, Keycloak, authbox-api, Envoy | `:8080`, `:8000`, `:9000`, `:9901`, Postgres `:5433` |
+| **Base Secure** | Base + `docker-compose.dev.secure.yaml` | Same four | `:9000`, `:9901`, Postgres `:5433` (lab `:8080`/`:8000` unpublished) |
+| **Base PKI** | Base Secure + `docker-compose.security.yaml` | Same four + step-ca | Same as Base Secure; step-ca only inside its container |
+| **Base PKI + device link** | Base PKI + FIWARE device listeners | Same as Base PKI | Also `:1029` (mTLS) and `:8883` (MQTT) when that option is used |
+
+Changing build replaces that set. Do not use `down-volumes` / `-Volumes` unless you intend to wipe `pgdata_lab` (the realm).
+
+### Preferred start — bring-up kit
+
+From the checkout `bring-up/` folder:
+
+```powershell
+cd bring-up
+.\configure.ps1
+# Edit repo-root .env — set secret values for the names in README.md
+.\start.ps1 -Package base
+.\start.ps1 -Package base-secure
+.\start.ps1 -Package base-pki
+.\start.ps1 -Package base-pki -WithFiwareLink
+.\stop.ps1 -Package base          # same -Package you started; volumes kept
+# .\stop.ps1 -Package base -Volumes   # destructive: removes pgdata_lab
+```
+
+```bash
+cd bring-up
+./configure.sh
+# Edit repo-root .env
+./start.sh --package base
+./start.sh --package base-secure
+./start.sh --package base-pki
+./start.sh --package base-pki --with-fiware-link
+./stop.sh --package base
+```
+
+`configure` checks Docker and creates `.env` from `.env.example` when missing. It does not start containers and does not print secrets.
+
+Published API image example:
+
+```powershell
+$env:SANDBOX_IMAGE = "ghcr.io/grep-digital/gd-authbox:build-N"
+.\start.ps1 -Package base-pki
+```
+
+### Lab controller — same builds
+
+The bring-up scripts call `devx/sandbox-ctl`. From the repo root:
+
+| Command | Meaning |
+|---|---|
+| `.\devx\sandbox-ctl.ps1 up -Mode base` | Start **Base** |
+| `.\devx\sandbox-ctl.ps1 up -Mode base-secure` | Start **Base Secure** |
+| `.\devx\sandbox-ctl.ps1 up -Mode base-pki` | Start **Base PKI** |
+| `.\devx\sandbox-ctl.ps1 up -Mode base-pki -WithFiwareLink` | Base PKI + device `:1029` / `:8883` |
+| `.\devx\sandbox-ctl.ps1 status -Mode base-secure` | Show container/health for that mode |
+| `.\devx\sandbox-ctl.ps1 down -Mode base` | Stop; **keep** volumes |
+| `.\devx\sandbox-ctl.ps1 down-volumes -Mode base` | Stop and **remove** volumes including `pgdata_lab` |
+
+Bash: `./devx/sandbox-ctl.sh` with the same verbs and `--mode` / `--with-fiware-link`.
+
+### Docker / controller options
+
+| Option | Where | Meaning |
 |---|---|---|
-| **Lab** | `http://localhost:8080` | `http://localhost:8000` |
-| **Gateway** | `http://localhost:9000` | `http://localhost:9000` |
+| `-Package` / `--package` | bring-up `start` / `stop` | `base` \| `base-secure` \| `base-pki` |
+| `-Mode` / `--mode` | `sandbox-ctl` | Same three names |
+| `-Timeout` / `--timeout` | both (ctl; bring-up passes through) | Readiness wait **15–600** s (ctl default **60**; bring-up start default **180**) |
+| `-Interval` / `--interval` | `sandbox-ctl` | Poll every **1–30** s (default **2**) |
+| `-WithFiwareLink` / `--with-fiware-link` | both | Device listeners; **requires** Base PKI |
+| `-Volumes` / `down-volumes` | stop / ctl | Destructive volume wipe |
+| `SANDBOX_IMAGE` | environment before start | Override API image tag |
+| `COMPOSE_HTTP_TIMEOUT` / `DOCKER_CLIENT_TIMEOUT` | environment | Compose/Docker client waits (ctl sets **120** when unset) |
 
-On the lab switch, host port 9000 may also be open. On the gateway switch, host ports 8000 and 8080 are not published.
+Deprecated mode aliases (`core*`, `dev*`, `dist`, `min`) still resolve on the controller but print DEPRECATED. Prefer `base` / `base-secure` / `base-pki`.
+
+### Useful Docker commands after start
+
+Container names are `auth-sandbox-<service>-1`.
 
 ```powershell
-$Access = "direct"; $KC = "http://localhost:8080"; $API = "http://localhost:8000"
+docker ps --filter "name=auth-sandbox-"
+docker inspect auth-sandbox-authbox-api-1 --format "{{.State.Health.Status}}"
+docker exec auth-sandbox-postgres-1 pg_isready -U nexus -d authbox_lab
+docker logs --tail 80 auth-sandbox-authbox-api-1
+docker exec auth-sandbox-step-ca-1 step ca health --ca-url https://localhost:9000 --root /home/step/certs/root_ca.crt
 ```
 
-Gateway switch. Both are already listening on port 9000. This assignment does not replace the running set.
-
-```powershell
-$Access = "gateway"; $KC = "http://localhost:9000"; $API = "http://localhost:9000"
-```
-
-The issuer on the API must be the same host as `$KC`. Direct is `http://localhost:8080/realms/nexus-test`. Gateway is `http://localhost:9000/realms/nexus-test`.
+After the build is up, set session hosts with [helpers/set-build.ps1](helpers/set-build.ps1), confirm with [helpers/health-build.ps1](helpers/health-build.ps1), then continue from [Calling the API](#calling-the-api) and [SCENARIO-TESTING.md](SCENARIO-TESTING.md).
 
 ## Calling the API
 
-Use the same host for the token and for the API call.
+Use the same host for the token and for the API call. On **Base**, both lab and gateway hosts work when those ports are open. On **Base Secure** and **Base PKI**, use the gateway host only.
 
-| Client | Direct access | Gateway access |
+| Client | Base (lab ports) | Base Secure / Base PKI |
 |---|---|---|
-| PowerShell | `$API = "http://localhost:8000"` and `$KC = "http://localhost:8080"` | both variables `http://localhost:9000` |
+| PowerShell | `$API = "http://localhost:8000"` and `$KC = "http://localhost:8080"` | both `http://localhost:9000` |
 | curl.exe | `curl.exe -sS "http://localhost:8000/authbox/health"` | `curl.exe -sS "http://localhost:9000/authbox/health"` |
-| Postman | environment `api` = `http://localhost:8000`, `keycloak` = `http://localhost:8080` | both `http://localhost:9000` |
+| Postman | `api` = `:8000`, `keycloak` = `:8080` | both `:9000` |
 
 A bearer call in the three forms:
 
@@ -78,17 +210,21 @@ Container names are `auth-sandbox-<service>-1`.
 
 | Section | Covers |
 |---|---|
-| [7. Ports already open](#7-ports-already-open) | which ports are already listening |
+| [Starting each build](#starting-each-build) | prerequisites, Docker options, start/stop per build |
+| [7. Ports by build](#7-ports-by-build) | which ports each build publishes |
 | [8. How the services fit together](#8-how-the-services-fit-together) | Postgres, Keycloak, the API, and Envoy |
-| [9. Cross-service reference](#9-cross-service-reference) | container names, environment names, health |
-| [10. End-to-end verification](#10-end-to-end-verification) | the scenario pass |
-| [Appendix A](#appendix-a--running-containers) | the containers that are already running |
+| [9. Cross-service reference](#9-cross-service-reference) | container names, environment names, health by build |
+| [10. End-to-end verification](#10-end-to-end-verification) | progressive scenario pass |
+| [11. Quick tips — certs and mTLS](#11-quick-tips--certs-and-mtls) | Base PKI helpers |
+| [Appendix A](#appendix-a--running-containers) | containers by build |
 
 ---
 
 # Part I — The services
 
 ## 1. Postgres
+
+Builds: **Base**, **Base Secure**, **Base PKI** (all three).
 
 ### 1.1 What it is
 
@@ -179,6 +315,8 @@ A recreate of the API does not wipe `pgdata_lab`. A recreate of Postgres uses th
 
 ## 2. Keycloak
 
+Builds: **Base** (host `:8080`), **Base Secure** / **Base PKI** (gateway `:9000` only).
+
 ### 2.1 What it is
 
 Keycloak 24 is the identity provider. It stores the realm in Postgres and mints access tokens. The lab realm is `nexus-test`.
@@ -209,7 +347,7 @@ Keycloak 24 is the identity provider. It stores the realm in Postgres and mints 
 | Direct port | `:8080` |
 | Gateway port | `:9000` via Envoy, path `/realms/` |
 
-The public issuer is the host on the switch you set: port 8080 on the lab switch, port 9000 on the gateway switch. The browser and the API use that same host. Inside the network the API fetches keys from `http://keycloak:8080/realms/nexus-test/protocol/openid-connect/certs`.
+The public issuer is the host for the build: port 8080 on Base, port 9000 on Base Secure and Base PKI. The browser and the API use that same host. Inside the network the API fetches keys from `http://keycloak:8080/realms/nexus-test/protocol/openid-connect/certs`.
 
 ### 2.5 Tasks
 
@@ -283,6 +421,8 @@ Use `$KC` for the switch you set. A token from `:8080` fails evaluation on an AP
 The gateway does not route `/admin/`. A call to `http://localhost:9000/admin/...` is an unrouted path. The status matrix is in [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md).
 
 ## 3. authbox-api
+
+Builds: **Base** (host `:8000`), **Base Secure** / **Base PKI** (gateway `:9000` only).
 
 ### 3.1 What it is
 
@@ -415,6 +555,8 @@ Calls with no bearer, including edge verify, Aadhaar, and wallet, use direct acc
 
 ## 4. Envoy
 
+Builds: **Base**, **Base Secure**, **Base PKI** (all three). Device `:1029` / `:8883` optional on Base PKI.
+
 ### 4.1 What it is
 
 Envoy is the gateway. It publishes Keycloak under `/realms/` and the API under `/authbox/`. When the device listener is published it also publishes `/orion/` and `/iotagent/`.
@@ -435,7 +577,7 @@ Envoy is the gateway. It publishes Keycloak under `/realms/` and the API under `
 
 ### 4.4 Configuration
 
-On the gateway switch, host ports 8000 and 8080 are not published. The gateway answers on port 9000.
+On Base Secure and Base PKI, host ports 8000 and 8080 are not published. The gateway answers on port 9000.
 
 ### 4.5 The filter chain
 
@@ -510,6 +652,8 @@ Do not add a route for Keycloak `/admin/`.
 
 ## 5. step-ca
 
+Builds: **Base PKI** only.
+
 ### 5.1 What it is
 
 step-ca is the certificate authority. It is present when the PKI container is already running. It listens on port `9000` inside its own container. That port is not the host's gateway port `9000`.
@@ -551,6 +695,8 @@ The container health status is `healthy` after the same probe succeeds.
 
 ## 6. Caddy (on-prem edge)
 
+Builds: none of the three lab builds. Production-shaped deployment only.
+
 ### 6.1 What it is
 
 On the production-shaped deployment, Caddy terminates HTTPS and forwards to the gateway. The lab ports in this guide are the host ports on this machine. Caddy is not part of that lab listener.
@@ -580,18 +726,17 @@ The on-prem database volume is `pgdata_onprem`. The lab database volume is `pgda
 
 # Part II — The platform
 
-## 7. Ports already open
+## 7. Ports by build
 
-The containers are already running. One switch in [SCENARIO-TESTING.md](SCENARIO-TESTING.md) selects which ports the later calls use. Pasting the other switch later changes every later call. Setting the switch does not start containers and does not replace the running set.
+| Build | API | Keycloak | Gateway | Admin | Postgres | step-ca | Device |
+|---|---|---|---|---|---|---|---|
+| **Base** | `:8000` | `:8080` | `:9000` | `:9901` | `:5433` | — | — |
+| **Base Secure** | unpublished | unpublished | `:9000` | `:9901` | `:5433` | — | — |
+| **Base PKI** | unpublished | unpublished | `:9000` | `:9901` | `:5433` | container only | `:1029`/`:8883` when published |
 
-| Switch | API | Keycloak | Gateway | What else is open |
-|---|---|---|---|---|
-| Lab | `:8000` | `:8080` | `:9000` may also be open | Postgres `:5433`. Gateway admin `:9901`. step-ca only inside its container when that container is running. |
-| Gateway | unpublished | unpublished | `:9000` | Postgres `:5433`. Gateway admin `:9901`. Device mTLS `:1029` and MQTT `:8883` when those listeners are published. |
+Changing which build is installed replaces that set. A short-lived check container is not that change. Progressive calls are in [SCENARIO-TESTING.md](SCENARIO-TESTING.md).
 
-The plain lab API listener is port 8000. The gateway listener is port 9000. The device listener, when published, is port 1029. Changing which set is running replaces that set. A short-lived check container is not that change.
-
-The production-shaped deployment joins the identity gateway and does not publish lab ports 8000 and 8080. Caddy terminates HTTPS in front of the gateway. The database is `authbox_production`.
+The production-shaped deployment (Caddy HTTPS, `authbox_production`) is outside these three lab builds. See [§6](#6-caddy-on-prem-edge).
 
 ## 8. How the services fit together
 
@@ -603,7 +748,7 @@ Keycloak owns the schema. User attributes, including `tenant_id` and `clearance`
 
 ### 8.2 How authbox-api works with Keycloak
 
-The browser login URL is built from the public issuer on the switch you set. The API fetches signing keys from Keycloak inside the Docker network. Evaluate checks the token, requires claim `tid`, and returns the URL tenant in field `tenant_id`.
+The browser login URL is built from the public issuer for the build you set. The API fetches signing keys from Keycloak inside the Docker network. Evaluate checks the token, requires claim `tid`, and returns the URL tenant in field `tenant_id`.
 
 Password grant and client credentials can be taken directly from Keycloak at `$KC/realms/nexus-test/protocol/openid-connect/token`, or through `POST .../auth/token` for client credentials and authorization-code exchange.
 
@@ -639,30 +784,53 @@ Values are not written here. Set them in the session before the scenario pass. T
 | Edge user, role `reader` | `AUTHBOX_EDGE_PROTECTED_USER`, `AUTHBOX_EDGE_PASSWORD` |
 | One-time secret inside the API container | `NEXUS_SIMULATOR_TOTP_SECRET` |
 
-### 9.3 Health checks
+### 9.3 Health checks by build
 
-| Check | Command |
+| Check | Command | Base | Base Secure | Base PKI |
+|---|---|---|---|---|
+| Postgres | `docker exec auth-sandbox-postgres-1 pg_isready -U nexus -d authbox_lab` | yes | yes | yes |
+| API | `Invoke-RestMethod "$API/authbox/health"` | `:8000` or `:9000` | `:9000` | `:9000` |
+| Keycloak | `Invoke-WebRequest "$KC/realms/nexus-test/.well-known/openid-configuration"` | `:8080` or `:9000` | `:9000` | `:9000` |
+| Envoy | `Invoke-WebRequest http://localhost:9901/ready` | yes | yes | yes |
+| step-ca | [5.5.1](#551-health) | no | no | yes |
+| Lab ports closed | TCP `:8000`/`:8080` fail | no (open) | yes | yes |
+
+### 9.4 Component defaults (names only)
+
+| Component | Default that the build expects |
 |---|---|
-| Postgres | `docker exec auth-sandbox-postgres-1 pg_isready -U nexus -d authbox_lab` |
-| API | `Invoke-RestMethod "$API/authbox/health"` |
-| Keycloak | `Invoke-WebRequest "$KC/realms/nexus-test/.well-known/openid-configuration"` |
-| Envoy | `Invoke-WebRequest http://localhost:9901/ready` |
-| step-ca | the command in [5.5.1](#551-health) |
+| Postgres | DB `authbox_lab`, user name `POSTGRES_USER`, host publish `5433` |
+| Keycloak | Realm `nexus-test`, admin names `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` |
+| authbox-api | Image `gd-authbox-dev:latest`; issuer host matches the build; seeded clients use the `NEXUS_*` and `AUTHBOX_*` names |
+| Envoy | Gateway `:9000`, admin `:9901`; JWT on `/authbox/` |
+| step-ca | Only on Base PKI; health inside the container against its own `:9000` |
 
 ## 10. End-to-end verification
 
-Run [SCENARIO-TESTING.md](SCENARIO-TESTING.md) in the same session after `$Access`, `$KC`, and `$API` above are set. Each group in that file has the call flow, then the same call in curl.exe and Postman, then the PowerShell line. Each scenario prints `PASS` or `FAIL`. Checks that need direct access print `SKIP` when `$Access` is `gateway`. The pass is S-01 through S-85, plus S-29b.
+Run [SCENARIO-TESTING.md](SCENARIO-TESTING.md) in one session after `$Build`, `$KC`, and `$API` are set. Progress through **Base**, then **Base Secure**, then **Base PKI** as that file directs. Each group has the call flow, then curl.exe and Postman, then the PowerShell line. Each scenario prints `PASS`, `FAIL`, or `SKIP`.
 
-One failure line means that layer. A JSON `401` on evaluate with a fresh password-grant token means the token issuer and `NEXUS_AUTH_ISSUER` disagree, or claim `tid` is absent. A plain-text `401` means Envoy rejected the JWT before the API.
+One failure line means that layer. A JSON `401` on evaluate with a fresh password-grant token means the token issuer and the API issuer disagree, or claim `tid` is absent. A plain-text `401` means Envoy rejected the JWT before the API.
+
+## 11. Quick tips — certs and mTLS
+
+These tips apply only when **Base PKI** is the installed build. Scripts: [helpers/README.md](helpers/README.md).
+
+| Tip | What it proves | Script |
+|---|---|---|
+| step-ca health | CA answers `ok` inside the container | [helpers/tip-stepca-health.ps1](helpers/tip-stepca-health.ps1) |
+| Device ports | TCP `:1029` / `:8883` when listeners are published | [helpers/tip-mtls-ports.ps1](helpers/tip-mtls-ports.ps1) |
+| Gateway still healthy after PKI | `GET http://localhost:9000/authbox/health` and admin `:9901/ready` | [helpers/health-build.ps1](helpers/health-build.ps1) with `$Build = "base-pki"` |
+
+Device certificate enrollment and FIWARE edge proofs that need a second product are not in this pack. When device listeners are published, use the port tip above, then the device-trust scenarios in [SCENARIO-TESTING.md](SCENARIO-TESTING.md) that the Base PKI section lists.
 
 ## Appendix A — Running containers
 
-| Container | What is open |
-|---|---|
-| `auth-sandbox-postgres-1` | Lab database `authbox_lab` on host port 5433 when the lab ports are published |
-| `auth-sandbox-keycloak-1` | Realm `nexus-test`. Host port 8080 on the lab switch. On the gateway switch the host port is not published |
-| `auth-sandbox-authbox-api-1` | Image `gd-authbox-dev:latest`. Host port 8000 on the lab switch |
-| `auth-sandbox-envoy-1` | Host port 9000. Admin port 9901. Device port 1029 when that listener is published |
-| `auth-sandbox-step-ca-1` | Port 9000 inside the container, when that container is running |
+| Container | Base | Base Secure | Base PKI |
+|---|---|---|---|
+| `auth-sandbox-postgres-1` | `:5433` → `authbox_lab` | same | same |
+| `auth-sandbox-keycloak-1` | host `:8080` | host unpublished | host unpublished |
+| `auth-sandbox-authbox-api-1` | host `:8000` | host unpublished | host unpublished |
+| `auth-sandbox-envoy-1` | `:9000`, `:9901` | `:9000`, `:9901` | same; optional `:1029`/`:8883` |
+| `auth-sandbox-step-ca-1` | absent | absent | present |
 
 Related pages in this pack: [README.md](README.md), [RELEASE-NOTES.md](RELEASE-NOTES.md), [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md), [SCENARIO-TESTING.md](SCENARIO-TESTING.md).
