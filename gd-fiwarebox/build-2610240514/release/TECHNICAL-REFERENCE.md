@@ -4,7 +4,7 @@ Contracts for the product described in [USER-GUIDE.md](USER-GUIDE.md). The execu
 
 ## Layout
 
-How you started decides which host port is published. The containers are the same compose project, `fiware-box`.
+Which **package** is running decides which host port is published. Chooser: [README.md](README.md). The containers are the same compose project, `fiware-box`.
 
 ```mermaid
 flowchart TB
@@ -16,13 +16,13 @@ flowchart TB
     camera[Camera]
   end
 
-  subgraph hoststart ["After a dev start"]
+  subgraph labstart ["Lab package"]
     orionHost["Orion host port 1026"]
     iotaHost["IoT Agent host port 1027"]
     mqttPlain["MQTT host port 1883"]
   end
 
-  subgraph linkedstart ["After Auth-Box is up, then a linked-mtls-media start"]
+  subgraph linkedstart ["Linked + cameras package"]
     envoy["Envoy host port 9000"]
     devices["Device mTLS host port 1029"]
     mqtts["MQTTS host port 8883"]
@@ -73,22 +73,24 @@ flowchart TB
   orion -->|"JSON-LD context"| context
 ```
 
-After a `dev` start, which does not use Auth-Box, call Orion on port `1026` and the IoT Agent on port `1027`. Port `1027` is a host map onto container port `4041`. Plain MQTT is port `1883`. Those three ports are the internal lab drill. `media` and `media-kurento` keep them and add the camera ports. `mtls`, `workshop`, and `break-glass` keep `1026` and `1027`, do not publish `1883`, and add MQTTS on `8883` when the certificate files are already mounted.
+On **Lab**, which does not use Auth-Box, call Orion on port `1026` and the IoT Agent on port `1027`. Port `1027` is a host map onto container port `4041`. Plain MQTT is port `1883`. Those three ports are the Lab drill. A Lab video option keeps them and adds the camera ports. **mTLS data-plane** keeps `1026` and `1027`, does not publish `1883`, and adds MQTTS on `8883` when the certificate files are already mounted.
 
-After Auth-Box is up and the stack is `linked-mtls` or `linked-mtls-media`, host ports `1026`, `1027`, and `1883` are not published. Call Orion at `http://localhost:9000/orion` and the IoT Agent at `http://localhost:9000/iotagent`. Both require a bearer token. Devices call `https://localhost:1029` with a client certificate, and MQTTS on `localhost:8883`.
+On **Linked edge** or **Linked + cameras** (Auth-Box already up), host ports `1026`, `1027`, and `1883` are not published. Call Orion at `http://localhost:9000/orion` and the IoT Agent at `http://localhost:9000/iotagent`. Both require a bearer token. Devices call `https://localhost:1029` with a client certificate, and MQTTS on `localhost:8883`. Linked + cameras also publishes MediaMTX on `9997`, `8554`, and `8888`.
 
 Inside the compose network the context document is `http://context/user-context.jsonld`. The context container has no host port. Read it with `docker exec` into `fiware-box-context-1`.
 
-A `media-kurento` start adds Kurento. Its host port is `8898`. `GET` that port at `/kurento` returns `426` when the WebSocket listener is up. That start is a different set of containers from `linked-mtls-media`.
+**Options (not packages):** **Kurento** (host `8898`; `GET /kurento` → `426`; U-07 throwaway or workshop). **Node-RED** (`:1880` provision UI). **ffmpeg / RTSP** to MediaMTX `:8554` (operator machine). QuantumLeap / Crate are out of this pack. A Kurento workshop topology is a different set of containers from Linked + cameras.
 
 ## Access paths
 
-| How you started | Auth-Box | Orion base | IoT Agent base | MQTT |
+| Package | Auth-Box | Orion base | IoT Agent base | MQTT / video |
 |---|---|---|---|---|
-| `dev`, `media`, `media-kurento`, `dev-nodered` | Not used | `http://localhost:1026` | `http://localhost:1027` | Plain `1883` |
-| `mtls`, `workshop`, `break-glass` | Not running. Certificate files are already mounted | `http://localhost:1026` | `http://localhost:1027` | MQTTS `8883` when the port is free |
-| `linked-mtls` | Already running | `http://localhost:9000/orion` | `http://localhost:9000/iotagent` | `8883` through Auth-Box |
-| `linked-mtls-media` | Already running | `http://localhost:9000/orion` | `http://localhost:9000/iotagent` | `8883` through Auth-Box. MediaMTX on `9997`, `8554`, `8888` |
+| Lab | Not used | `http://localhost:1026` | `http://localhost:1027` | Plain `1883` |
+| mTLS data-plane | Not at request time. Certs mounted | `http://localhost:1026` | `http://localhost:1027` | MQTTS `8883` when free |
+| Linked edge | Already running | `http://localhost:9000/orion` | `http://localhost:9000/iotagent` | `8883` through Auth-Box |
+| Linked + cameras | Already running | `http://localhost:9000/orion` | `http://localhost:9000/iotagent` | `8883` through Auth-Box; MediaMTX `9997`, `8554`, `8888` |
+
+Lab mode name aliases (`dev`, `mtls`, `linked-mtls`, `linked-mtls-media`, …) are in [USER-GUIDE.md](USER-GUIDE.md) [§10.4](USER-GUIDE.md#104-lab-mode-name-aliases-footnote).
 
 | Header | Value on this pack |
 |---|---|
@@ -125,7 +127,7 @@ Intents:
 
 ## Routes
 
-Host access, after `up -Mode dev`. Replace the host with port `9000` and the path prefix `/orion` or `/iotagent` after a linked start, and add the bearer token.
+Host access on **Lab** (and mTLS data-plane for Orion / IoT Agent). On Linked packages, replace the host with port `9000` and the path prefix `/orion` or `/iotagent`, and add the bearer token.
 
 | Method and path | Who answers | Result |
 |---|---|---|
@@ -140,7 +142,7 @@ Host access, after `up -Mode dev`. Replace the host with port `9000` and the pat
 | `GET /user-context.jsonld` | Context container, port 80 inside the network | `200` JSON |
 | `GET /v3/paths/list` on port `9997` | MediaMTX | `401` with no credentials. `200` as the publisher |
 | `GET /iot/devices` on `https://localhost:1029` | Auth-Box, client certificate plus bearer token | `200` or `404` |
-| `GET /kurento` on port `8898` | Kurento, only after `media-kurento` or scenario U-07 | `426` |
+| `GET /kurento` on port `8898` | Kurento option or scenario U-07 | `426` |
 | RTSP publish to port `8554` path `live` | MediaMTX, publisher credentials | The path is listed by `GET /v3/paths/list` on `9997` |
 
 `PATCH` sent to port `9000` returns `405`. A command is a `GET` of the entity on port `9000`, then an NGSI-LD `PATCH` to the IoT Agent on container port `4041`. The IoT Agent publishes `/{apikey}/{deviceId}/cmd`.
@@ -173,18 +175,18 @@ Ready for an HTTP check is `200`–`299`, or `426` for Kurento. An anonymous `20
 
 | Port | When it is published | What answers |
 |---|---|---|
-| `1026` | Internal lab drill on `dev`, `media`, `media-kurento`, `dev-nodered`, `mtls`, `workshop`, `break-glass` | Orion |
-| `1027` | Those same starts | Host map onto IoT Agent `4041` |
-| `7896` | `dev` | IoT Agent HTTP southbound |
-| `1883` | Those same starts, except `mtls`, `workshop`, and `break-glass` use `8883` for the device broker | Plain MQTT with username and password |
-| `8883` | `mtls`, `workshop`, and `break-glass` when the port is free. On a linked start this port belongs to Auth-Box | MQTTS |
+| `1026` | Lab, mTLS data-plane (and Lab video / Node-RED / Kurento workshop options) | Orion |
+| `1027` | Those same packages / options | Host map onto IoT Agent `4041` |
+| `7896` | Lab | IoT Agent HTTP southbound |
+| `1883` | Lab (and Lab options that keep plain MQTT). Not on mTLS data-plane or Linked | Plain MQTT with username and password |
+| `8883` | mTLS data-plane when free. On Linked packages this port belongs to Auth-Box | MQTTS |
 | `9000` | Auth-Box | Token and gateway |
-| `1029` | Auth-Box, linked modes | Device mTLS API |
-| `9997` | `media`, `media-kurento`, `linked-mtls-media` | MediaMTX API |
-| `8554` | Those camera modes | RTSP |
-| `8888` | Those camera modes | HLS |
-| `8889` | Those camera modes | WebRTC |
-| `8898` | `media-kurento` | Kurento |
+| `1029` | Auth-Box, Linked packages | Device mTLS API |
+| `9997` | Linked + cameras (or a Lab video option) | MediaMTX API |
+| `8554` | Those camera surfaces | RTSP |
+| `8888` | Those camera surfaces | HLS |
+| `8889` | Those camera surfaces | WebRTC |
+| `8898` | Kurento option / U-07 | Kurento |
 
 ## Files the running containers already have
 
@@ -199,7 +201,7 @@ The checks that need a throwaway copy write it in [SCENARIO-TESTING.md](SCENARIO
 | Camera configuration | No | One named publisher. An empty user list grants nobody |
 | `.env` | No | Not used. Values come from the environment |
 
-The plain broker copies the hash to `/tmp/mosquitto.passwd`, sets owner `1883`, and sets mode `600` before Mosquitto starts. mTLS modes require a client certificate on listener `8883` and start `/entrypoint.sh`.
+The plain broker copies the hash to `/tmp/mosquitto.passwd`, sets owner `1883`, and sets mode `600` before Mosquitto starts. mTLS data-plane and Linked packages require a client certificate on listener `8883` and start `/entrypoint.sh`. Solo `docker run` of either leaf is unsupported ([README.md](README.md)).
 
 ## Images and license notices
 
@@ -211,9 +213,9 @@ The plain broker copies the hash to `/tmp/mosquitto.passwd`, sets owner `1883`, 
 | `fiware/orion-ld:1.5.1` | Upstream terms |
 | `fiware/iotagent-json:3.14.0` | Upstream terms |
 | `mongo:4.4.30` | Upstream terms. The image is digest-pinned |
-| `kurento/kurento-media-server:7.0.0` | Upstream terms. Present on a `media-kurento` start and for scenario U-07 |
+| `kurento/kurento-media-server:7.0.0` | Upstream terms. Kurento option and scenario U-07 |
 
-Node-RED is a workshop UI on port `1880`. It is not one of the two images in this pack.
+Node-RED is a workshop option on port `1880`. It is not one of the two leaves in this pack. Leaves and GHCR stamps: [RELEASE-NOTES.md](RELEASE-NOTES.md).
 
 MongoDB is queried with the `mongo` shell, not `mongosh`. Orion-LD stores the `openiot` tenant in database `orion-openiot`. Database `orion` is the default tenant and is empty until that tenant is used. The IoT Agent registry is database `iotagentjson`, collections `groups`, `devices`, and `commands`.
 

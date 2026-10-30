@@ -2,7 +2,7 @@
 
 Each section is one flow: the diagram, then the same call in `curl.exe` and in Postman where the interface is HTTP, then the Windows PowerShell 5.1 or PowerShell 7 line that records `PASS`, `FAIL`, or `SKIP`. The PowerShell line prints the observed value and does not print a password.
 
-Set how you started first. Service background is [USER-GUIDE.md](USER-GUIDE.md). Contracts are [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). This edition is [RELEASE-NOTES.md](RELEASE-NOTES.md).
+Paste exactly one `$How` line for the **package** already running. Chooser: [README.md](README.md). Service background: [USER-GUIDE.md](USER-GUIDE.md). Contracts: [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). This edition: [RELEASE-NOTES.md](RELEASE-NOTES.md).
 
 In PowerShell, `curl` is an alias for `Invoke-WebRequest`. The REST lines use `curl.exe`.
 
@@ -10,8 +10,8 @@ In PowerShell, `curl` is an alias for `Invoke-WebRequest`. The REST lines use `c
 
 | Section | Scenarios |
 |---|---|
-| [Prerequisites](#prerequisites) | What must be running, how to start it, paste order |
-| [Setup](#setup) | How you started, helpers |
+| [Prerequisites](#prerequisites) | Package matrix, what must be running, paste order |
+| [Setup](#setup) | Package → `$How`, helpers |
 | [Device broker entrypoint](#device-broker-entrypoint) | B-01 to B-05 |
 | [Device broker ACL](#device-broker-acl) | B-06 to B-07 |
 | [Plain MQTT listener](#plain-mqtt-listener) | B-08 to B-09 |
@@ -25,38 +25,67 @@ In PowerShell, `curl` is an alias for `Invoke-WebRequest`. The REST lines use `c
 
 ## Prerequisites
 
-The blocks on this page do not start the stack. They record a pass against containers that are already running. Paste them in one Windows PowerShell 5.1 or 7 window, in the order below. A block pasted into a new window has no `$How`, no `$Token`, and no result list. Which start is the lab drill and which is the production-shaped deployment, and how Node-RED or an RTSP publisher lines up with these ids, is [USER-GUIDE.md](USER-GUIDE.md) section 15.
+The blocks on this page do not start the stack. They record a pass against containers that are already running. Paste them in one Windows PowerShell 5.1 or 7 window, in the order below. A block pasted into a new window has no `$How`, no `$Token`, and no result list. Lab vs Linked packages, Node-RED, and an RTSP publisher: [USER-GUIDE.md](USER-GUIDE.md) section 15.
+
+### Package → scenarios
+
+`run` = paste and expect `PASS` (or intentional `SKIP` when an env var is empty). `skip` = that leaf or Auth-Box surface is not in the package; do not treat a live `FAIL` there as a package miss. `image` = needs the leaf image; may start a throwaway. B-08, B-09, and U-07 always use their own short-lived containers.
+
+| Id | Lab | mTLS data-plane | Linked edge | Linked + cameras |
+|---|---|---|---|---|
+| B-01 | image | run | run | run |
+| B-02–B-07 | skip | run | run | run |
+| B-08, B-09 | run | run | run | run |
+| C-01, C-02 | image* | image* | image* | run |
+| C-03–C-05 | skip | skip | skip | run |
+| U-01–U-03 | run | run | run | run |
+| U-04, U-05 | skip | skip | run | run |
+| U-06 | skip† | run | run | run |
+| U-07 | run | run | run | run |
+
+\* C-01/C-02 only need the MediaMTX image; they do not need the live camera container.  
+† U-06 publishes MQTTS with device certs; Lab has no broker leaf. Use section 9 in [USER-GUIDE.md](USER-GUIDE.md) for a Lab plain-MQTT measurement.
+
+`$How` is the lab mode alias for that package ([USER-GUIDE.md](USER-GUIDE.md) §10.4):
+
+| Package | `$How` |
+|---|---|
+| Lab | `dev` |
+| mTLS data-plane | `mtls` |
+| Linked edge | `linked-mtls` |
+| Linked + cameras (default) | `linked-mtls-media` |
 
 ### What must already be running
 
-The default value is `$How = "linked-mtls-media"`. Before the first block, `docker ps` shows these containers up:
+Default package is **Linked + cameras** (`$How = "linked-mtls-media"`). Before the first block, `docker ps` shows these containers up:
 
-| Container | Used by |
-|---|---|
-| `auth-sandbox-envoy-1` on `9000`, `1029`, and `8883` | U-02, U-03, U-04, U-05, U-06 read-back |
-| `fiware-box-mosquitto-1` | B-02, B-03, B-04, B-05, B-06, B-07, U-04, U-05, U-06 |
-| `fiware-box-orion-1`, `fiware-box-iot-agent-1`, `fiware-box-mongo-1` | U-02, U-03, U-06 |
-| `fiware-box-context-1` | U-01 |
-| `fiware-box-mediamtx-1` on `9997` | C-03, C-04, C-05 |
+| Container | Used by | Packages |
+|---|---|---|
+| `auth-sandbox-envoy-1` on `9000`, `1029`, and `8883` | U-02, U-03, U-04, U-05, U-06 read-back | Linked edge, Linked + cameras |
+| `fiware-box-mosquitto-1` (broker leaf) | B-02–B-07, U-04, U-05, U-06 | mTLS data-plane, Linked* |
+| `fiware-box-mosquitto-1` (plain digest) | Lab drill context | Lab |
+| `fiware-box-orion-1`, `fiware-box-iot-agent-1`, `fiware-box-mongo-1` | U-02, U-03, U-06 | all |
+| `fiware-box-context-1` | U-01 | all |
+| `fiware-box-mediamtx-1` on `9997` | C-03, C-04, C-05 | Linked + cameras |
 
 Images that must already exist, because a check starts a container from them:
 
 | Image | Used by |
 |---|---|
-| `fiware-box/mosquitto-mtls:local` | B-01, and the live device broker |
-| `fiware-box/mediamtx:1.9.3-wget` | C-01, C-02, and the live camera gateway |
+| `fiware-box/mosquitto-mtls:local` (or matching GHCR stamp) | B-01, and the live device broker on mTLS / Linked |
+| `fiware-box/mediamtx:1.9.3-wget` (or matching GHCR stamp) | C-01, C-02, and the live camera gateway |
 | `eclipse-mosquitto:2` digest `sha256:6f8d8a947c506f8a2290ec65cd4bd2bc7cb4d43fb5f6271f861cb013e2ef9797` | B-08, B-09. The block starts it and removes it |
 | `kurento/kurento-media-server:7.0.0` | U-07. The block starts it and removes it |
 
 Set these in that same window before the block that reads them. This page does not contain the values.
 
-| Name | Read by |
-|---|---|
-| `AUTHBOX_CLIENT_SECRET`, `AUTHBOX_IOT_PASSWORD` | `Get-LabToken`, then U-02 through U-06 |
-| `FIWARE_API_KEY` | B-06, B-07, U-06 |
-| `MEDIAMTX_PUBLISH_PASSWORD` | C-04, C-05 |
+| Name | Read by | Packages |
+|---|---|---|
+| `AUTHBOX_CLIENT_SECRET`, `AUTHBOX_IOT_PASSWORD` | `Get-LabToken`, then U-02 through U-06 | Linked* |
+| `FIWARE_API_KEY` | B-06, B-07, U-06 | mTLS / Linked* (and Lab §9) |
+| `MEDIAMTX_PUBLISH_PASSWORD` | C-04, C-05 | Linked + cameras |
 
-Auth-Box must currently list the CN `sensor001`. A `403` body `device identity 'sensor001' not in trust registry` means that list does not contain it. The certificate files at `/mosquitto/certs` inside `fiware-box-mosquitto-1` must still be inside their 24 hours.
+On Linked packages, Auth-Box must currently list the CN `sensor001`. A `403` body `device identity 'sensor001' not in trust registry` means that list does not contain it. The certificate files at `/mosquitto/certs` inside `fiware-box-mosquitto-1` must still be inside their 24 hours.
 
 ```text
 docker ps --format "{{.Names}} {{.Status}}"
@@ -64,20 +93,22 @@ docker ps --format "{{.Names}} {{.Status}}"
 
 ### If those containers are not running
 
-This page does not start them. The containers named above are already running before any block is pasted. Device certificates are already mounted and still inside 24 hours. Auth-Box currently lists CN `sensor001`.
+This page does not start them. Start and stop each package with `fiware-ctl` / Auth-Box `sandbox-ctl` as in [USER-GUIDE.md](USER-GUIDE.md) [§16](USER-GUIDE.md#16-starting-and-stopping-each-package). Confirm the package with `docker ps`, then paste the matching `$How`. Device certificates for mTLS / Linked are already mounted and still inside 24 hours. On Linked packages, Auth-Box currently lists CN `sensor001`.
 
-`dev` is a different set of containers: Orion on `1026`, the IoT Agent on `1027`, and plain MQTT on `1883`, with no Auth-Box. After that set is what `docker ps` shows, paste `$How = "dev"` and do not paste `$How = "linked-mtls-media"`. `media-kurento` is also a different set. B-08, B-09, and U-07 do not need that change. Each one starts a short-lived container of its own.
+**Lab** (`$How = "dev"`): Orion on `1026`, IoT Agent on `1027`, plain MQTT on `1883`, no Auth-Box. Do not also paste `$How = "linked-mtls-media"`. A Kurento workshop option is a different set; B-08, B-09, and U-07 do not need that change — each starts a short-lived container of its own.
+
+**Host `8883` when you change package:** Lab and mTLS data-plane need FIWARE MQTTS on host `8883`. Linked packages need Auth-Box Envoy on that port. Stop Auth-Box before Lab or mTLS. Before Linked again, stop FIWARE first, then bring Auth-Box up. Detail: [USER-GUIDE.md](USER-GUIDE.md) [§16.3](USER-GUIDE.md#163-auth-box-before-linked-packages).
 
 ### Paste order in the one window
 
-1. Exactly one `$How` line. The default is `linked-mtls-media`.
+1. Exactly one `$How` line. Default package Linked + cameras → `linked-mtls-media`.
 2. The address line that sets `$ORION` and `$IOTA`.
 3. `$Results` and `Add-Check`.
-4. `Get-LabToken`, then `Get-DeviceApiCode`, when `$How` is not `dev`.
-5. B-01 through U-07 in the order on this page.
-6. The Results block.
+4. `Get-LabToken`, then `Get-DeviceApiCode`, when `$How` starts with `linked`.
+5. Scenario blocks that apply to that package (see matrix), in page order — paste each block **exactly** as written below. A shortened B-05 or B-06 script can `FAIL` while the pack script `PASS`es.
+6. The Results block. Matrix `skip` rows are `N/A` for that package, not failures.
 
-Pasting the other `$How` line later changes `$ORION` and `$IOTA` for every block after it. C-05 reads the C-03 and C-04 rows already stored in `$Results`. Pasting C-05 before those two records a failure. A failed id is pasted again in this same window, after Setup. A new window does not have the helpers.
+Pasting another `$How` line later changes `$ORION` and `$IOTA` for every block after it. C-05 reads the C-03 and C-04 rows already stored in `$Results`. Pasting C-05 before those two records a failure. A failed id is pasted again in this same window, after Setup. A new window does not have the helpers.
 
 ### What each scenario borrows
 
@@ -94,35 +125,49 @@ Pasting the other `$How` line later changes `$ORION` and `$IOTA` for every block
 | C-04 | `fiware-box-mediamtx-1`, `MEDIAMTX_PUBLISH_PASSWORD` | `Add-Check` | None. `SKIP` when the password is empty |
 | C-05 | C-03 and C-04 already recorded | Those two rows in `$Results` | None |
 | U-01 | `fiware-box-context-1` | `Add-Check` | None |
-| U-02 | Orion at `$ORION`. On a linked start, `$Token` | `$How`, `$ORION`, `$Token` | None. `SKIP` when the linked token is empty |
-| U-03 | IoT Agent at `$IOTA`. On a linked start, `$Token` | `$How`, `$IOTA`, `$Token` | None. `SKIP` when the linked token is empty |
-| U-04, U-05 | Auth-Box `:1029`, `sensor001` certificate, CN listed | `Get-DeviceApiCode`, `$Token` | None. `SKIP` on `dev` or when `$Token` is empty |
-| U-06 | Live broker, `FIWARE_API_KEY`, Orion. On a linked start, `$Token` | `$How`, `$ORION`, `$Token` | None |
+| U-02 | Orion at `$ORION`. On Linked packages, `$Token` | `$How`, `$ORION`, `$Token` | None. `SKIP` when the Linked token is empty |
+| U-03 | IoT Agent at `$IOTA`. On Linked packages, `$Token` | `$How`, `$IOTA`, `$Token` | None. `SKIP` when the Linked token is empty |
+| U-04, U-05 | Auth-Box `:1029`, `sensor001` certificate, CN listed | `Get-DeviceApiCode`, `$Token` | None. `SKIP` when `$How` is not Linked, or `$Token` empty |
+| U-06 | Live broker leaf, `FIWARE_API_KEY`, Orion. On Linked packages, `$Token` | `$How`, `$ORION`, `$Token` | None |
 | U-07 | `kurento/kurento-media-server:7.0.0` can be run | `Add-Check` | `kurento-u07`, then removed |
 | Results | The blocks above | Every row in `$Results` | None |
 
 ## Setup
 
-How you started the device broker and the camera gateway together. The containers are already running. [Prerequisites](#prerequisites) is the start command when they are not, and the paste order for this page.
+Paste exactly one `$How` for the package already running. [Prerequisites](#prerequisites) has the matrix and paste order. Containers are already up.
+
+**Linked + cameras** (default recorded pass):
 
 ```powershell
 $How = "linked-mtls-media"
 ```
 
-That means Auth-Box is already up, `fiware-box-mosquitto-1` is the device-broker image, and `fiware-box-mediamtx-1` is answering on port `9997`. U-02, U-03, U-04, U-05, and the U-06 read-back call that Auth-Box install. U-04 and U-05 also need the certificate CN listed there. A `403` body `device identity 'sensor001' not in trust registry` means the list does not contain it. B-08 and B-09 start the pinned plain Mosquitto image. U-07 starts `kurento/kurento-media-server:7.0.0`. The full list is [USER-GUIDE.md](USER-GUIDE.md) section 12.
+Auth-Box is already up, `fiware-box-mosquitto-1` is the broker leaf, and `fiware-box-mediamtx-1` answers on `9997`. U-02, U-03, U-04, U-05, and the U-06 read-back call that Auth-Box install. U-04 and U-05 also need CN `sensor001` listed there. A `403` body `device identity 'sensor001' not in trust registry` means the list does not contain it. B-08 and B-09 start the pinned plain Mosquitto image. U-07 starts `kurento/kurento-media-server:7.0.0`. Auth-Box dependency detail: [USER-GUIDE.md](USER-GUIDE.md) section 12.
 
-How you started the plain listener instead. This is the internal lab drill. Auth-Box is not used. Orion is on `1026`, the IoT Agent is on `1027`, and plain MQTT is on `1883`.
+**Linked edge** (no MediaMTX leaf — skip C-03–C-05):
+
+```powershell
+$How = "linked-mtls"
+```
+
+**mTLS data-plane** (host Orion / IoT Agent; broker leaf; no Auth-Box at request time — skip U-04, U-05 and C-03–C-05):
+
+```powershell
+$How = "mtls"
+```
+
+**Lab** (plain MQTT; no broker leaf ACL / MQTTS measurement on this page):
 
 ```powershell
 $How = "dev"
 ```
 
-That means Orion answers on port `1026`, the IoT Agent answers on port `1027`, and `fiware-box-mosquitto-1` is the plain MQTT listener on port `1883`.
+Orion on `1026`, IoT Agent on `1027`, plain MQTT on `1883`.
 
-Addresses that follow from `$How`:
+Addresses that follow from `$How` (`linked*` → Auth-Box gateway; otherwise Lab / mTLS host ports):
 
 ```powershell
-if ($How -eq "dev") { $ORION = "http://localhost:1026"; $IOTA = "http://localhost:1027" } else { $ORION = "http://localhost:9000/orion"; $IOTA = "http://localhost:9000/iotagent" }
+if ($How -like "linked*") { $ORION = "http://localhost:9000/orion"; $IOTA = "http://localhost:9000/iotagent" } else { $ORION = "http://localhost:1026"; $IOTA = "http://localhost:1027" }
 ```
 
 ```powershell
@@ -131,18 +176,18 @@ $Results = New-Object System.Collections.Generic.List[object]; function Add-Chec
 
 Postman environment for this session:
 
-| Variable | After `up -Mode dev` | After `up -Mode linked-mtls-media` |
+| Variable | Lab / mTLS data-plane | Linked edge / Linked + cameras |
 |---|---|---|
 | `orion` | `http://localhost:1026` | `http://localhost:9000/orion` |
 | `iota` | `http://localhost:1027` | `http://localhost:9000/iotagent` |
-| `mediamtx` | unset | `http://localhost:9997` |
+| `mediamtx` | unset | `http://localhost:9997` on Linked + cameras |
 | `gateway` | unset | `http://localhost:9000` |
 | `devices` | unset | `https://localhost:1029` |
 | `token` | unset | access token from `{{gateway}}/realms/nexus-test` |
 
 `MEDIAMTX_PUBLISH_PASSWORD`, `AUTHBOX_CLIENT_SECRET`, `AUTHBOX_IOT_PASSWORD`, and `FIWARE_API_KEY` stay in the environment. The lines below read them and do not print them. This pack does not contain those values.
 
-Mint a token for a linked start. The call is `POST http://localhost:9000/realms/nexus-test/protocol/openid-connect/token` with `Content-Type: application/x-www-form-urlencoded`.
+Mint a token for a Linked package. The call is `POST http://localhost:9000/realms/nexus-test/protocol/openid-connect/token` with `Content-Type: application/x-www-form-urlencoded`.
 
 | Field | Value |
 |---|---|
@@ -197,11 +242,11 @@ curl -sk -o /dev/null -w "%{http_code}" --cert /mosquitto/certs/sensor001.crt --
 }
 ```
 
-U-02 and U-03 use `$Token` when `$How` is not `dev`.
+U-02 and U-03 use `$Token` when `$How -like "linked*"`.
 
 ## Device broker entrypoint
 
-How you started: any mode that runs `fiware-box/mosquitto-mtls:local` (`mtls`, `linked-mtls`, or `linked-mtls-media`). Paste Setup first. B-02 and B-03 read the live broker. B-04 and B-05 copy certificate files out of that broker. B-01 only needs the image, and it removes `mosq-b01` when it finishes.
+Package: **mTLS data-plane**, **Linked edge**, or **Linked + cameras** (broker leaf). Paste Setup first. B-02 and B-03 read the live broker. B-04 and B-05 copy certificate files out of that broker. B-01 only needs the image, and it removes `mosq-b01` when it finishes.
 
 The entrypoint waits for broker certificates, accepts a compatible CRL, installs the ACL, and can point the trust bundle at the break-glass file.
 
@@ -279,7 +324,7 @@ $bg = Join-Path $env:TEMP "fiware-b05"; if (Test-Path $bg) { Remove-Item -Recurs
 
 ## Device broker ACL
 
-How you started: `linked-mtls-media` or another mode whose Mosquitto container is `fiware-box/mosquitto-mtls:local`. The certificate files are already mounted at `/mosquitto/certs` inside that container. Set `FIWARE_API_KEY` in this window before B-06. B-07 uses the same broker and the same key.
+Package: **mTLS data-plane**, **Linked edge**, or **Linked + cameras**. The certificate files are already mounted at `/mosquitto/certs` inside the broker leaf. Set `FIWARE_API_KEY` in this window before B-06. B-07 uses the same broker and the same key.
 
 The IoT Agent certificate may read device `attrs` topics and may not write them. The device certificate may write only the topic whose device segment equals its CN.
 
@@ -428,7 +473,7 @@ The anonymous client prints:
 
 ## Camera gateway
 
-How you started: `up -Mode linked-mtls-media` with `MEDIAMTX_PUBLISH_PASSWORD` set. The image is `fiware-box/mediamtx:1.9.3-wget`. C-01 and C-02 use that image. C-03 and C-04 call the live container on `9997`. Paste C-05 only after C-03 and C-04 have stored a row in `$Results`.
+Package: **Linked + cameras**, with `MEDIAMTX_PUBLISH_PASSWORD` set. The image is `fiware-box/mediamtx:1.9.3-wget` (or the matching GHCR stamp). C-01 and C-02 use that image only. C-03 and C-04 call the live container on `9997`. Paste C-05 only after C-03 and C-04 have stored a row in `$Results`. On Linked edge or packages without MediaMTX, skip C-03–C-05.
 
 An empty user list rejects every API caller. The live process rejects a call with no credentials and accepts the named publisher.
 
@@ -515,7 +560,7 @@ $open = @($Results | Where-Object Id -eq "C-03" | Select-Object -Last 1).Result;
 
 ## Context and Orion
 
-How you started: any mode. The context container has no host port, so U-01 is `docker exec` into `fiware-box-context-1`. U-02 uses `$ORION` from Setup: port `1026` after `dev`, port `9000` after a linked start. On a linked start, paste `Get-LabToken` first. An empty `$Token` records `SKIP`.
+Package: any. The context container has no host port, so U-01 is `docker exec` into `fiware-box-context-1`. U-02 uses `$ORION` from Setup: host `1026` on Lab / mTLS data-plane; port `9000` on Linked packages. On Linked packages, paste `Get-LabToken` first. An empty `$Token` records `SKIP`.
 
 ```mermaid
 sequenceDiagram
@@ -531,7 +576,7 @@ sequenceDiagram
 | Id | curl.exe | Postman |
 |---|---|---|
 | U-01 | No host port. Use the PowerShell `docker exec` line | No host URL |
-| U-02 | `curl.exe -sS "$ORION/version"` | `GET {{orion}}/version`. After a linked start, header `Authorization: Bearer {{token}}` |
+| U-02 | `curl.exe -sS "$ORION/version"` | `GET {{orion}}/version`. On Linked packages, header `Authorization: Bearer {{token}}` |
 
 **U-01.** Context document.
 
@@ -543,21 +588,21 @@ $hdr = docker exec fiware-box-context-1 wget -S -O - http://127.0.0.1/user-conte
 > True
 > ```
 
-**U-02.** Orion version. On a linked start this needs a bearer token. `SKIP` when that secret is unset.
+**U-02.** Orion version. On Linked packages this needs a bearer token. `SKIP` when that secret is unset.
 
 ```powershell
-if ($How -ne "dev" -and -not $Token) { Add-Check "U-02" "SKIP" } else { $params = @{ Uri = "$ORION/version" }; if ($How -ne "dev") { $params.Headers = @{ Authorization = "Bearer $Token" } }; $r = Invoke-RestMethod @params; $r.'orionld version'; Add-Check "U-02" $(if ($r.'orionld version' -eq "1.5.1") { "PASS" } else { "FAIL" }) }
+if ($How -like "linked*" -and -not $Token) { Add-Check "U-02" "SKIP" } else { $params = @{ Uri = "$ORION/version" }; if ($How -like "linked*") { $params.Headers = @{ Authorization = "Bearer $Token" } }; $r = Invoke-RestMethod @params; $r.'orionld version'; Add-Check "U-02" $(if ($r.'orionld version' -eq "1.5.1") { "PASS" } else { "FAIL" }) }
 ```
 
 > ```
 > 1.5.1
 > ```
 
-After a linked start the same request sends `Authorization: Bearer $Token`. `SKIP` when `$Token` is empty.
+On Linked packages the same request sends `Authorization: Bearer $Token`. `SKIP` when `$Token` is empty.
 
 ## IoT Agent and device API
 
-How you started: `dev` uses host port `1027`. A linked start uses port `9000` for `GET`, and port `1029` for the certificate check. Inside the compose network the agent is `iot-agent:4041`. U-03 uses `$IOTA` and `$Token` from Setup. U-04 and U-05 call `Get-DeviceApiCode`, so that function has to be pasted first, and Auth-Box must currently list `sensor001`.
+Package: Lab / mTLS data-plane use host port `1027`. Linked packages use port `9000` for `GET`, and port `1029` for the certificate check. Inside the compose network the agent is `iot-agent:4041`. U-03 uses `$IOTA` and `$Token` from Setup. U-04 and U-05 call `Get-DeviceApiCode`, so that function has to be pasted first, and Auth-Box must currently list `sensor001`.
 
 ```mermaid
 sequenceDiagram
@@ -583,28 +628,28 @@ sequenceDiagram
 **U-03.** About, on the address selected in Setup. Linked `GET` on port `9000` needs the bearer token.
 
 ```powershell
-if ($How -ne "dev" -and -not $Token) { Add-Check "U-03" "SKIP" } else { $hdr = @{ "Fiware-Service" = "openiot" }; if ($How -ne "dev") { $hdr.Authorization = "Bearer $Token" }; $r = Invoke-WebRequest -Uri "$IOTA/iot/about" -Headers $hdr -UseBasicParsing; $r.StatusCode; Add-Check "U-03" $(if ($r.StatusCode -eq 200) { "PASS" } else { "FAIL" }) }
+if ($How -like "linked*" -and -not $Token) { Add-Check "U-03" "SKIP" } else { $hdr = @{ "Fiware-Service" = "openiot" }; if ($How -like "linked*") { $hdr.Authorization = "Bearer $Token" }; $r = Invoke-WebRequest -Uri "$IOTA/iot/about" -Headers $hdr -UseBasicParsing; $r.StatusCode; Add-Check "U-03" $(if ($r.StatusCode -eq 200) { "PASS" } else { "FAIL" }) }
 ```
 
 > ```
 > 200
 > ```
 
-**U-04.** Device list on port `1029`. This call goes to the Auth-Box install. `SKIP` on a `dev` start or when `$Token` is empty. Pass is `200` or `404`. A body `device identity 'sensor001' not in trust registry` means Auth-Box does not currently list that CN.
+**U-04.** Device list on port `1029`. This call goes to the Auth-Box install. `SKIP` when `$How` is not Linked, or when `$Token` is empty. Pass is `200` or `404`. A body `device identity 'sensor001' not in trust registry` means Auth-Box does not currently list that CN.
 
 ```powershell
-if ($How -eq "dev" -or -not $Token) { Add-Check "U-04" "SKIP" } else { $code = Get-DeviceApiCode "/iot/devices"; $code; Add-Check "U-04" $(if ($code -eq "200" -or $code -eq "404") { "PASS" } else { "FAIL" }) }
+if ($How -notlike "linked*" -or -not $Token) { Add-Check "U-04" "SKIP" } else { $code = Get-DeviceApiCode "/iot/devices"; $code; Add-Check "U-04" $(if ($code -eq "200" -or $code -eq "404") { "PASS" } else { "FAIL" }) }
 ```
 
 **U-05.** CN match and mismatch. The matching path is `/iot/devices/sensor001`. The mismatch path is `/iot/devices/other-device`.
 
 ```powershell
-if ($How -eq "dev" -or -not $Token) { Add-Check "U-05" "SKIP" } else { $match = Get-DeviceApiCode "/iot/devices/sensor001"; $bad = Get-DeviceApiCode "/iot/devices/other-device"; "sensor001=$match other-device=$bad"; Add-Check "U-05" $(if ($match -ne "403" -and $bad -eq "403") { "PASS" } else { "FAIL" }) }
+if ($How -notlike "linked*" -or -not $Token) { Add-Check "U-05" "SKIP" } else { $match = Get-DeviceApiCode "/iot/devices/sensor001"; $bad = Get-DeviceApiCode "/iot/devices/other-device"; "sensor001=$match other-device=$bad"; Add-Check "U-05" $(if ($match -ne "403" -and $bad -eq "403") { "PASS" } else { "FAIL" }) }
 ```
 
 ## Measurement
 
-How you started: `mtls`, `linked-mtls`, or `linked-mtls-media`, with device certificates enrolled. The device publishes MQTTS. Orion then shows the measurement. Set `FIWARE_API_KEY` first. On a linked start, `$Token` from `Get-LabToken` is what the read-back sends. B-06 and B-07 do not have to have passed before this block.
+Package: **mTLS data-plane**, **Linked edge**, or **Linked + cameras**, with device certificates enrolled. The device publishes MQTTS. Orion then shows the measurement. Set `FIWARE_API_KEY` first. On Linked packages, `$Token` from `Get-LabToken` is what the read-back sends. B-06 and B-07 do not have to have passed before this block.
 
 ```mermaid
 sequenceDiagram
@@ -626,12 +671,12 @@ The publish itself is MQTT. The read-back is HTTP.
 |---|---|---|
 | U-06 read-back | `curl.exe -sS -H "Fiware-Service: openiot" -H "NGSILD-Tenant: openiot" -H "Authorization: Bearer <token>" "$ORION/ngsi-ld/v1/entities/urn:ngsi-ld:Thing:sensor001"` | `GET {{orion}}/ngsi-ld/v1/entities/urn:ngsi-ld:Thing:sensor001` with `Fiware-Service: openiot`, `NGSILD-Tenant: openiot`, and the bearer token |
 
-Do not pass the measurement with `mosquitto_pub -m`. The recorded line sends the JSON on stdin. Do not put `<token>` on a `curl.exe` command line. The read-back uses `$Token` inside `Invoke-RestMethod` and does not print it. On a `dev` start, `$Token` is empty and `$ORION` is port `1026`, so the read-back has no bearer header. `SKIP` when `FIWARE_API_KEY` is empty, and on a linked start when `$Token` is empty.
+Do not pass the measurement with `mosquitto_pub -m`. The recorded line sends the JSON on stdin. Do not put `<token>` on a `curl.exe` command line. The read-back uses `$Token` inside `Invoke-RestMethod` and does not print it. On Lab / mTLS data-plane, `$ORION` is port `1026` and the read-back has no bearer header (mTLS still publishes MQTTS). `SKIP` when `FIWARE_API_KEY` is empty, and on Linked packages when `$Token` is empty. Lab without a broker leaf should not treat this block as the package pass — use [USER-GUIDE.md](USER-GUIDE.md) section 9.
 
 **U-06.** Publish and read back.
 
 ```powershell
-if (-not $env:FIWARE_API_KEY -or ($How -ne "dev" -and -not $Token)) { Add-Check "U-06" "SKIP" } else {
+if (-not $env:FIWARE_API_KEY -or ($How -like "linked*" -and -not $Token)) { Add-Check "U-06" "SKIP" } else {
     $env:FIWARE_MEAS_T = "$(Get-Random -Minimum 100 -Maximum 999)"
     $sh = Join-Path $env:TEMP "fiware-u06.sh"
     $utf8 = New-Object System.Text.UTF8Encoding $false
@@ -665,7 +710,7 @@ printf '%s\n' "{\"t\":${FIWARE_MEAS_T},\"h\":60}" | mosquitto_pub -h 127.0.0.1 -
 
 ## Kurento
 
-U-07 starts `kurento/kurento-media-server:7.0.0` on `127.0.0.1:8898` when that port is not already answering, then removes the container it started. Leave the camera lab on `linked-mtls-media`. This block does not read earlier scenario rows, other than `Add-Check` from Setup. A subscriber keeps its own history. This pack does not start QuantumLeap or Crate.
+U-07 starts `kurento/kurento-media-server:7.0.0` on `127.0.0.1:8898` when that port is not already answering, then removes the container it started. Leave **Linked + cameras** running; this check does not change package. This block does not read earlier scenario rows, other than `Add-Check` from Setup. A subscriber keeps its own history. This pack does not start QuantumLeap or Crate.
 
 ```mermaid
 sequenceDiagram
@@ -709,30 +754,30 @@ if ($started) { docker rm -f kurento-u07 | Out-Null }
 $Results | Format-Table -AutoSize; "PASS=$((@($Results | Where-Object Result -eq 'PASS')).Count) FAIL=$((@($Results | Where-Object Result -eq 'FAIL')).Count) SKIP=$((@($Results | Where-Object Result -eq 'SKIP')).Count)"
 ```
 
-Paste this block last, in the same window. On a `linked-mtls-media` start, set `AUTHBOX_CLIENT_SECRET`, `AUTHBOX_IOT_PASSWORD`, `FIWARE_API_KEY`, and `MEDIAMTX_PUBLISH_PASSWORD` before Setup. U-02, U-03, U-04, U-05, and U-06 are `SKIP` when `$Token` is empty. B-06, B-07, and U-06 are `SKIP` when `FIWARE_API_KEY` is empty. B-05 is `SKIP` when the running broker has no `ca-bundle-break-glass.pem`. A `FAIL` id is pasted again in this same window. A new window does not have `$Results` or the helpers.
+Paste this block last, in the same window. On **Linked + cameras**, set `AUTHBOX_CLIENT_SECRET`, `AUTHBOX_IOT_PASSWORD`, `FIWARE_API_KEY`, and `MEDIAMTX_PUBLISH_PASSWORD` before Setup. On Linked packages, U-02, U-03, U-04, U-05, and U-06 are `SKIP` when `$Token` is empty. B-06, B-07, and U-06 are `SKIP` when `FIWARE_API_KEY` is empty. B-05 is `SKIP` when the running broker has no `ca-bundle-break-glass.pem`. Score the package against the [matrix](#package-scenarios), not against every id. A `FAIL` id is pasted again in this same window. A new window does not have `$Results` or the helpers.
 
 ## Scenario index
 
-| Id | What it checks |
-|---|---|
-| B-01 | Device broker waits when broker certificates are missing |
-| B-02 | `require_certificate` and `crlfile` are in the runtime config |
-| B-03 | ACL file mode `600` |
-| B-04 | No ACL file, broker still starts |
-| B-05 | Break-glass CA bundle is applied |
-| B-06 | IoT Agent certificate cannot publish `sensor001` attrs |
-| B-07 | `sensor001` measurement is delivered |
-| B-08 | Plain MQTT with no username is refused |
-| B-09 | Plain MQTT user from the environment connects |
-| C-01 | Camera image contains the MIT notice and `/mediamtx` |
-| C-02 | Empty MediaMTX user list rejects the API |
-| C-03 | Live MediaMTX API with no credentials is `401` |
-| C-04 | Live MediaMTX API as the publisher is `200` |
-| C-05 | Readiness is C-03 and C-04 |
-| U-01 | Context document is `200` |
-| U-02 | Orion version is `1.5.1` |
-| U-03 | IoT Agent `/iot/about` is `200` |
-| U-04 | Port `1029` device list is `200` or `404` |
-| U-05 | Matching CN is not `403`. `other-device` is `403` |
-| U-06 | MQTTS measurement is visible in Orion |
-| U-07 | Kurento `GET /kurento` is `426` |
+| Id | What it checks | Primary packages |
+|---|---|---|
+| B-01 | Device broker waits when broker certificates are missing | mTLS / Linked* (image on any) |
+| B-02 | `require_certificate` and `crlfile` are in the runtime config | mTLS / Linked* |
+| B-03 | ACL file mode `600` | mTLS / Linked* |
+| B-04 | No ACL file, broker still starts | mTLS / Linked* |
+| B-05 | Break-glass CA bundle is applied | mTLS / Linked* |
+| B-06 | IoT Agent certificate cannot publish `sensor001` attrs | mTLS / Linked* |
+| B-07 | `sensor001` measurement is delivered | mTLS / Linked* |
+| B-08 | Plain MQTT with no username is refused | all (throwaway) |
+| B-09 | Plain MQTT user from the environment connects | all (throwaway) |
+| C-01 | Camera image contains the MIT notice and `/mediamtx` | Linked + cameras (image elsewhere) |
+| C-02 | Empty MediaMTX user list rejects the API | Linked + cameras (image elsewhere) |
+| C-03 | Live MediaMTX API with no credentials is `401` | Linked + cameras |
+| C-04 | Live MediaMTX API as the publisher is `200` | Linked + cameras |
+| C-05 | Readiness is C-03 and C-04 | Linked + cameras |
+| U-01 | Context document is `200` | all |
+| U-02 | Orion version is `1.5.1` | all |
+| U-03 | IoT Agent `/iot/about` is `200` | all |
+| U-04 | Port `1029` device list is `200` or `404` | Linked* |
+| U-05 | Matching CN is not `403`. `other-device` is `403` | Linked* |
+| U-06 | MQTTS measurement is visible in Orion | mTLS / Linked* |
+| U-07 | Kurento `GET /kurento` is `426` | all (throwaway; does not change package) |
