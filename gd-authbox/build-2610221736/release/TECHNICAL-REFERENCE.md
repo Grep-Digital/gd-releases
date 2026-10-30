@@ -20,7 +20,7 @@ Containers for one build are already running. Changing the installed build repla
 | Base Secure | Same containers; lab ports unpublished | `http://localhost:9000/realms/nexus-test` |
 | Base PKI | Base Secure + step-ca | `http://localhost:9000/realms/nexus-test` |
 
-Postgres on every lab build: database `authbox_lab`, volume `pgdata_lab`, host `:5433`. Inside the network Keycloak uses `postgres:5432`. Defaults and health: [USER-GUIDE.md](USER-GUIDE.md) §1–§5 and §9.
+Postgres on every lab build: database `authbox_lab`, volume `pgdata_lab`, host `:5433`. Inside the network Keycloak uses `postgres:5432`. Defaults and health: [USER-GUIDE.md](USER-GUIDE.md) §5.
 
 ## Layout
 

@@ -1595,7 +1595,7 @@ $ok = Invoke-Api POST "$API/authbox/default/default/api/v1/auth/token/revoke" @{
 
 Run Phase 1 on **Base** first (full S-01…S-85). Then install **Base Secure**, reassign setup, remint `$TokenA` / `$TokenB` / `$TokenM`, and re-run the bearer groups that matter for gateway access (Health S-01, Evaluate S-16…S-23, Machine tokens, FIWARE/IUDX/MCP with bearer, Device trust S-75…S-85). Direct-only ids record `SKIP`. Then install **Base PKI**, reassign setup, remint tokens, repeat the Base Secure gateway pass, and add B-04…B-06.
 
-Cross-references: ports and defaults [USER-GUIDE.md](USER-GUIDE.md) §7 and §9; listening matrix [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md); tips [helpers/README.md](helpers/README.md).
+Cross-references: ports and operate steps [USER-GUIDE.md](USER-GUIDE.md) §5; listening matrix [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md); tips [helpers/README.md](helpers/README.md).
 
 **B-01.** Base health: Postgres ready, API `:8000` health `ok`, Keycloak discovery `:8080`, Envoy admin `:9901/ready`.
 

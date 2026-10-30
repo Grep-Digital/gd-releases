@@ -8,13 +8,13 @@ This pack covers **three published builds**. Each build is a different installat
 | **Base Secure** | Same containers; lab API and Keycloak ports unpublished | Gateway `:9000`, admin `:9901`, Postgres `:5433` |
 | **Base PKI** | Base Secure plus step-ca | Same as Base Secure; step-ca only inside its container (internal `:9000`, not the host gateway) |
 
-Optional on **Base PKI** only: device mTLS `:1029` and MQTT `:8883` when those listeners are published. That overlay is not a fourth build. Procedures are under Base PKI in [USER-GUIDE.md](USER-GUIDE.md) and the quick tips in [helpers/README.md](helpers/README.md).
+On **Base PKI**: step-ca is always present; device mTLS `:1029` and MQTT `:8883` are this pack’s device edge (confirm after start — see [USER-GUIDE.md](USER-GUIDE.md) §5.5.8). Tips: [helpers/README.md](helpers/README.md).
 
 The documents link only inside `release/`. Helper scripts live in [helpers/](helpers/). They set the build variables and run health checks. They do not print secret values.
 
 | File | What it is |
 |---|---|
-| [USER-GUIDE.md](USER-GUIDE.md) | Per build: start/stop + Docker options, contents, defaults, health, usage |
+| [USER-GUIDE.md](USER-GUIDE.md) | End-user guide: stack pieces → packs → choose → install & run → operate |
 | [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md) | Layout, claims, routes, status codes, build listening matrix |
 | [SCENARIO-TESTING.md](SCENARIO-TESTING.md) | Progressive pass: Base → Base Secure → Base PKI (S-01…S-85 plus B-01…B-06) |
 | [RELEASE-NOTES.md](RELEASE-NOTES.md) | What this edition answers for the three builds |
@@ -22,14 +22,14 @@ The documents link only inside `release/`. Helper scripts live in [helpers/](hel
 
 Call the HTTP API with **curl.exe** or **Postman**. The recorded pass is **Windows PowerShell 5.1 or PowerShell 7**. In PowerShell the name `curl` is an alias for `Invoke-WebRequest`, so the REST examples use `curl.exe`. A call that sends a secret uses `curl.exe --config` on a UTF-8 file with no byte-order mark. The file uses the environment names below. It does not contain a copied secret from this page.
 
-Postman is not one of the released images. Install it yourself. Keycloak and Postgres stay upstream images. The image this repo builds is `gd-authbox-dev:latest`.
+Postman is not one of the released images. Install it yourself. Keycloak, Postgres, Envoy, and step-ca stay upstream images. The API image this product builds is tagged locally as `gd-authbox-dev:latest` (or the short tag from a handoff load). The Markdown and [helpers/](helpers/) in this pack are separate files the reader downloads — they are not layers inside that API image.
 
 ## Choose one build per session
 
 Set `$Build` once. Pasting another build later changes which ports and components the later calls expect. Changing the running installation replaces that set. A short-lived check container is not that change.
 
 ```powershell
-# Base — lab ports and gateway both usable
+# Base — direct Keycloak/API ports and gateway both usable
 $Build = "base"; $KC = "http://localhost:8080"; $API = "http://localhost:8000"
 ```
 
@@ -50,7 +50,7 @@ Or run [helpers/set-build.ps1](helpers/set-build.ps1). The issuer on the API mus
 | authbox-api (`gd-authbox-dev:latest`) | yes (host `:8000`) | yes (host unpublished) | yes (host unpublished) |
 | Envoy gateway `:9000` / admin `:9901` | yes | yes | yes |
 | step-ca | no | no | yes |
-| Device `:1029` / MQTT `:8883` | no | no | optional when published |
+| Device `:1029` / MQTT `:8883` | no | no | yes when device edge enabled |
 
 Defaults, health commands, and usage for each component are in [USER-GUIDE.md](USER-GUIDE.md). Contracts are in [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). The progressive pass is [SCENARIO-TESTING.md](SCENARIO-TESTING.md).
 
@@ -68,6 +68,8 @@ These documents name environment variables. They do not contain the values.
 | `AUTHBOX_USER_A_PASSWORD` | Password for that user |
 | `AUTHBOX_USER_B` | Password-grant user whose claim `tid` is `tenant_b` |
 | `AUTHBOX_USER_B_PASSWORD` | Password for that user |
+| `NEXUS_SIMULATOR_KEYCLOAK_USER` / `…_PASSWORD` | Same person as `AUTHBOX_USER_A` in the downloadable pack `.env` (alias before token calls — see [USER-GUIDE.md](USER-GUIDE.md) §5.2.6) |
+| `NEXUS_SIMULATOR_TENANT_B_USER` / `…_PASSWORD` | Same person as `AUTHBOX_USER_B` in the downloadable pack `.env` |
 | `AUTHBOX_EDGE_USER` | Edge user with role `operator`. The password is `AUTHBOX_EDGE_PASSWORD`. Username alone is `401` |
 | `AUTHBOX_EDGE_PROTECTED_USER` | Edge user with role `reader` |
 | `AUTHBOX_EDGE_PASSWORD` | Password for `AUTHBOX_EDGE_USER` and for `AUTHBOX_EDGE_PROTECTED_USER` |
@@ -84,7 +86,7 @@ A new PowerShell window has none of the scenario variables and no result list. P
 
 | Piece | Edition |
 |---|---|
-| API image | `gd-authbox-dev:latest` |
+| API image | Handoff: `gd-authbox:2.1.0` · Checkout lab: `gd-authbox-dev:latest` |
 | Package `gd-authbox` | 2.1.0 |
 | `nexus-auth` | 4.0.0 |
 | `nexus-common` | 3.4.0 |

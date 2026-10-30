@@ -1,6 +1,6 @@
 # Auth-in-a-Box — this edition
 
-This edition publishes **three builds**, not one runtime. Procedures are in [USER-GUIDE.md](USER-GUIDE.md). Contracts are in [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). The progressive scenario pass is in [SCENARIO-TESTING.md](SCENARIO-TESTING.md). Quick helpers: [helpers/README.md](helpers/README.md). Index: [README.md](README.md).
+This edition publishes **three builds**, not one runtime. End-user procedures: [USER-GUIDE.md](USER-GUIDE.md). Contracts are in [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md). The progressive scenario pass is in [SCENARIO-TESTING.md](SCENARIO-TESTING.md). Quick helpers: [helpers/README.md](helpers/README.md). Index: [README.md](README.md).
 
 ## Three builds
 
@@ -14,11 +14,10 @@ Optional on **Base PKI** only: device mTLS `:1029` and MQTT `:8883` when those l
 
 | Topic | Where it is covered |
 |---|---|
-| Start / stop / Docker options per build | [USER-GUIDE.md](USER-GUIDE.md) — Starting each build |
-| Contents, defaults, health, usage per component | [USER-GUIDE.md](USER-GUIDE.md) |
+| What this pack is, packs, choose, install & run, operate | [USER-GUIDE.md](USER-GUIDE.md) |
 | Listening matrix, claims, routes, status codes | [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md) |
 | Progressive scenarios Base → Secure → PKI (S-* and B-*) | [SCENARIO-TESTING.md](SCENARIO-TESTING.md) |
-| Cert / mTLS quick tips | [USER-GUIDE.md](USER-GUIDE.md) §11, [helpers/](helpers/) |
+| Cert / mTLS quick tips | [USER-GUIDE.md](USER-GUIDE.md) §5.6, [helpers/](helpers/) |
 
 ## Manual verification (operator)
 
@@ -26,12 +25,12 @@ Run against containers that are already up for each installed build. Do not wipe
 
 | Pass | Build | What to run | Expect |
 |---|---|---|---|
-| M-1 | Base | `bring-up`/`sandbox-ctl` up `-Package`/`-Mode` `base`; then `. .\helpers\set-build.ps1 -Build base`; `. .\helpers\health-build.ps1` | Lab ports open; health PASS |
+| M-1 | Base | Downloadable: unzip `…-handoff-base-…` → `./start-pack` → `. .\release\helpers\set-build.ps1 -Build base` → `health-build` (checkout: `bring-up`/`sandbox-ctl`) | Lab ports open; health PASS |
 | M-2 | Base | [SCENARIO-TESTING.md](SCENARIO-TESTING.md) S-01…S-85 (+ S-29b) with `$Access` `direct`; B-01 | S-* SKIP count 0; B-02…B-06 SKIP |
-| M-3 | Base Secure | Install `base-secure`; remint tokens; set-build `base-secure`; health-build | Lab `:8000`/`:8080` closed; gateway health ok |
+| M-3 | Base Secure | Unzip `…-base-secure-…` → `start-pack`; remint tokens on `:9000`; set-build `base-secure`; health-build | Lab `:8000`/`:8080` closed; gateway health ok |
 | M-4 | Base Secure | Re-run bearer groups + B-02, B-03; direct-only ids SKIP | B-01 and B-04…B-06 SKIP |
-| M-5 | Base PKI | Install `base-pki`; set-build `base-pki`; health-build; tip-stepca-health | step-ca `ok`; gateway still healthy |
-| M-6 | Base PKI | B-03…B-06; tip-mtls-ports; device-trust S-75…S-83 | B-05 may report ports closed if device listeners unpublished |
+| M-5 | Base PKI | Unzip `…-base-pki-…` → `start-pack`; set-build `base-pki`; health-build; tip-stepca-health | step-ca `ok`; gateway still healthy |
+| M-6 | Base PKI | `devx/pki/issue-client-cert.ps1` + `refresh-client-cert.ps1` (from pack root); B-03…B-06; tip-mtls-ports; device-trust S-75…S-83 | Leaf issue PASS; B-05 may report ports closed if device listeners unpublished |
 | M-7 | Optional device link | `base-pki -WithFiwareLink`; tip-mtls-ports | `:1029` / `:8883` open when published |
 
 Offline/live ladder proofs (checkout): `tests/test_package_ladder_combos.py` and `devx/verify/run-package-ladder-live.ps1` (`down` only). Those are not the adopter scenario paste.
@@ -40,7 +39,7 @@ Offline/live ladder proofs (checkout): `tests/test_package_ladder_combos.py` and
 
 | Piece | Value |
 |---|---|
-| API | FastAPI on Python 3.13, image `gd-authbox-dev:latest` |
+| API | FastAPI on Python 3.13; handoff image `gd-authbox:2.1.0` · checkout lab `gd-authbox-dev:latest` |
 | `gd-authbox` | 2.1.0 |
 | `nexus-auth` | 4.0.0 |
 | `nexus-common` | 3.4.0 |
